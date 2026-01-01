@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# SQLite indexes (generated, large)
+*.db
+*.sqlite
+*.sqlite3
+indexes/
+
+# Parquet exports (generated, large)
+exports/
+*.parquet
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cloudflare
+.wrangler/
+.dev.vars
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Build artifacts
+*.tsbuildinfo

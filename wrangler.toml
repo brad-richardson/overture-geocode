@@ -1,0 +1,14 @@
+name = "overture-geocoder"
+main = "src/worker.ts"
+compatibility_date = "2024-01-01"
+
+# Local D1 database for development
+[[d1_databases]]
+binding = "DB_MA"
+database_name = "geocoder-us-ma"
+database_id = "local-dev"
+
+# Uncomment for R2 geometry cache:
+# [[r2_buckets]]
+# binding = "R2_CACHE"
+# bucket_name = "overture-geocoder-cache"
