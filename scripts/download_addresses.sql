@@ -51,11 +51,14 @@ COPY (
             CONCAT(address_levels[1].value, ' ', postcode)
         ) as primary_name,
         -- Build search text (lowercase, for FTS indexing)
+        -- Includes: number, street, city, state, postcode, country
         LOWER(CONCAT_WS(' ',
             COALESCE(number, ''),
             COALESCE(street, ''),
             COALESCE(address_levels[2].value, postal_city, ''),
-            COALESCE(postcode, '')
+            COALESCE(address_levels[1].value, ''),  -- state abbreviation (MA)
+            COALESCE(postcode, ''),
+            'us'  -- country (addresses are US-only currently)
         )) as search_text
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=addresses/type=address/*',

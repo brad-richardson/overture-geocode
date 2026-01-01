@@ -9,6 +9,10 @@ on:
         description: 'Force data update even if release unchanged'
         type: boolean
         default: false
+      force_schema_rebuild:
+        description: 'Force rebuild with current release (for schema/SQL changes)'
+        type: boolean
+        default: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -59,7 +63,8 @@ jobs:
       - name: Decide if update needed
         id: decide
         run: |
-          if [ "${{ github.event.inputs.force_data_update }}" = "true" ]; then
+          if [ "${{ github.event.inputs.force_data_update }}" = "true" ] || \
+             [ "${{ github.event.inputs.force_schema_rebuild }}" = "true" ]; then
             echo "Force update requested"
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.check.outputs.release_changed }}" = "true" ]; then

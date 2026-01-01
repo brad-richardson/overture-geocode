@@ -233,4 +233,42 @@ describe('/search endpoint', () => {
       expect(results).toEqual([]);
     });
   });
+
+  describe('compound queries with state/region', () => {
+    it('should find divisions with state abbreviation qualifier', async () => {
+      const response = await fetch(`${baseUrl}/search?q=Boston%2C+MA&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+
+    it('should find divisions with state abbreviation (no comma)', async () => {
+      const response = await fetch(`${baseUrl}/search?q=Boston+MA&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+
+    it('should find divisions with full state name', async () => {
+      const response = await fetch(`${baseUrl}/search?q=Boston+Massachusetts&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+
+    it('should find divisions with country qualifier', async () => {
+      const response = await fetch(`${baseUrl}/search?q=Boston+US&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+  });
 });
