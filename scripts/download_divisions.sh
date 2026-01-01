@@ -5,6 +5,10 @@
 #
 # If RELEASE is not provided, fetches the latest from STAC catalog.
 # Example: ./scripts/download_divisions.sh 2025-12-17.0
+#
+# Outputs:
+#   exports/divisions-global.parquet  - Forward geocoding data (with FTS search_text)
+#   exports/divisions-reverse.parquet - Reverse geocoding data (with hierarchy_json)
 
 set -e
 
@@ -28,11 +32,13 @@ fi
 # Create exports directory
 mkdir -p "$PROJECT_DIR/exports"
 
-# Run SQL with release substituted
 cd "$PROJECT_DIR"
+
+# Download forward geocoding data
+echo "Downloading forward geocoding data..."
 sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_global.sql | duckdb
 
-# Verify data was actually downloaded (sanity check for expired data)
+# Verify forward data
 if [ ! -f "$PROJECT_DIR/exports/divisions-global.parquet" ]; then
     echo "ERROR: Output file not created - release $RELEASE may be expired (data removed after 90 days)"
     exit 1
@@ -44,4 +50,19 @@ if [ -z "$ROW_COUNT" ] || [ "$ROW_COUNT" -eq 0 ]; then
     exit 1
 fi
 
-echo "Done! Output: exports/divisions-global.parquet ($ROW_COUNT rows)"
+echo "Forward geocoding: exports/divisions-global.parquet ($ROW_COUNT rows)"
+
+# Download reverse geocoding data
+echo "Downloading reverse geocoding data..."
+sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_reverse.sql | duckdb
+
+# Verify reverse data
+if [ ! -f "$PROJECT_DIR/exports/divisions-reverse.parquet" ]; then
+    echo "ERROR: Reverse output file not created"
+    exit 1
+fi
+
+REVERSE_COUNT=$(duckdb -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/divisions-reverse.parquet')" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+echo "Reverse geocoding: exports/divisions-reverse.parquet ($REVERSE_COUNT rows)"
+
+echo "Done!"

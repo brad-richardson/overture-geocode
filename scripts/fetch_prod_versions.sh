@@ -1,7 +1,12 @@
 #!/bin/bash
 # Fetch current gers_id and version from production D1 database
 #
-# Usage: ./scripts/fetch_prod_versions.sh [output_file]
+# Usage: ./scripts/fetch_prod_versions.sh [output_file] [db_name] [table_name]
+#
+# Arguments:
+#   output_file - Output CSV file (default: prod_versions.csv)
+#   db_name     - D1 database name (default: geocoder-divisions-global)
+#   table_name  - Table to query (default: divisions)
 #
 # Output: CSV file with gers_id,version columns
 # Requires: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID env vars
@@ -13,13 +18,14 @@
 set -e
 
 OUTPUT_FILE="${1:-prod_versions.csv}"
-DB_NAME="geocoder-divisions-global"
+DB_NAME="${2:-geocoder-divisions-global}"
+TABLE_NAME="${3:-divisions}"
 
-echo "Fetching production versions from D1 ($DB_NAME)..."
+echo "Fetching production versions from D1 ($DB_NAME, table: $TABLE_NAME)..."
 
 # First check if the table has a version column
 HAS_VERSION=$(npx wrangler d1 execute "$DB_NAME" --remote \
-    --command "PRAGMA table_info(divisions)" \
+    --command "PRAGMA table_info($TABLE_NAME)" \
     --json 2>&1 | python3 -c "
 import json
 import sys
@@ -45,9 +51,9 @@ if [ "$HAS_VERSION" = "false" ]; then
 fi
 
 # Query D1 for current versions
-echo "Querying divisions table..."
+echo "Querying $TABLE_NAME table..."
 RESULT=$(npx wrangler d1 execute "$DB_NAME" --remote \
-    --command "SELECT gers_id, version FROM divisions" \
+    --command "SELECT gers_id, version FROM $TABLE_NAME" \
     --json 2>&1) || {
     echo "Warning: Query failed with error:"
     echo "$RESULT"

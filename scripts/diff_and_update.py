@@ -5,14 +5,19 @@ Differential update script for Overture geocoder D1 database.
 Compares new Overture data against production and generates minimal SQL updates.
 Uses the version field (which increments when features change) to identify updates.
 
+Supports two table types:
+- divisions: Forward geocoding with FTS search_text
+- divisions_reverse: Reverse geocoding with hierarchy_json
+
 Usage:
-    # Generate diff SQL files (requires production versions CSV)
+    # Forward geocoding (default)
     python scripts/diff_and_update.py indexes/divisions-global.db exports/diff \
         --prod-versions prod_versions.csv --release 2025-12-17.0
 
-    # Export production versions (run via wrangler)
-    # wrangler d1 execute geocoder-divisions-global --remote \
-    #   --command "SELECT gers_id, version FROM divisions" > prod_versions.csv
+    # Reverse geocoding
+    python scripts/diff_and_update.py indexes/divisions-reverse.db exports/diff-reverse \
+        --prod-versions prod_versions_reverse.csv --release 2025-12-17.0 \
+        --table divisions_reverse
 
 Output:
     exports/diff/upserts.sql    - INSERT OR REPLACE for new/changed records
@@ -27,6 +32,25 @@ import json
 import math
 import sqlite3
 from pathlib import Path
+
+# Table schemas for different database types
+TABLE_SCHEMAS = {
+    "divisions": {
+        "columns": [
+            "gers_id", "version", "type", "primary_name", "lat", "lon",
+            "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+            "population", "country", "region", "search_text"
+        ],
+    },
+    "divisions_reverse": {
+        "columns": [
+            "gers_id", "version", "subtype", "primary_name", "lat", "lon",
+            "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+            "area", "population", "country", "region",
+            "parent_division_id", "hierarchy_json"
+        ],
+    },
+}
 
 
 def load_prod_versions(csv_path: Path) -> dict[str, int]:
@@ -96,6 +120,7 @@ def generate_diff(
     output_dir: Path,
     prod_versions: dict[str, int],
     release: str,
+    table: str = "divisions",
     chunk_size: int = 10000,
 ) -> dict:
     """Generate differential SQL updates."""
@@ -103,15 +128,15 @@ def generate_diff(
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
+    if table not in TABLE_SCHEMAS:
+        raise ValueError(f"Unknown table: {table}. Must be one of: {list(TABLE_SCHEMAS.keys())}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     db = sqlite3.connect(db_path)
 
-    columns = [
-        "gers_id", "version", "type", "primary_name", "lat", "lon",
-        "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-        "population", "country", "region", "search_text"
-    ]
+    schema = TABLE_SCHEMAS[table]
+    columns = schema["columns"]
     cols_str = ", ".join(columns)
 
     # Track stats
@@ -130,9 +155,9 @@ def generate_diff(
     # Open upserts file
     upserts_file = output_dir / "upserts.sql"
     with open(upserts_file, "w") as f:
-        f.write("-- Upserts: new and changed records\n\n")
+        f.write(f"-- Upserts: new and changed records for {table}\n\n")
 
-        cursor = db.execute(f"SELECT {cols_str} FROM divisions")
+        cursor = db.execute(f"SELECT {cols_str} FROM {table}")
 
         batch_count = 0
         for row in cursor:
@@ -147,13 +172,13 @@ def generate_diff(
                 # New record
                 stats["inserts"] += 1
                 values = ", ".join(format_value(v) for v in row)
-                f.write(f"INSERT OR REPLACE INTO divisions ({cols_str}) VALUES ({values});\n")
+                f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
                 batch_count += 1
             elif new_version > prod_version:
                 # Updated record
                 stats["updates"] += 1
                 values = ", ".join(format_value(v) for v in row)
-                f.write(f"INSERT OR REPLACE INTO divisions ({cols_str}) VALUES ({values});\n")
+                f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
                 batch_count += 1
             else:
                 # Unchanged
@@ -168,12 +193,12 @@ def generate_diff(
     # Generate deletes for records no longer in source
     deletes_file = output_dir / "deletes.sql"
     with open(deletes_file, "w") as f:
-        f.write("-- Deletes: records removed from Overture\n\n")
+        f.write(f"-- Deletes: records removed from Overture for {table}\n\n")
 
         for gers_id in prod_versions.keys():
             if gers_id not in seen_gers_ids:
                 stats["deletes"] += 1
-                f.write(f"DELETE FROM divisions WHERE gers_id = {escape_sql_string(gers_id)};\n")
+                f.write(f"DELETE FROM {table} WHERE gers_id = {escape_sql_string(gers_id)};\n")
 
     # Generate metadata update
     metadata_file = output_dir / "metadata.sql"
@@ -223,6 +248,12 @@ def main():
         help="Overture release version (e.g., 2025-12-17.0)"
     )
     parser.add_argument(
+        "--table",
+        default="divisions",
+        choices=list(TABLE_SCHEMAS.keys()),
+        help="Table schema to use (default: divisions)"
+    )
+    parser.add_argument(
         "--chunk-size",
         type=int,
         default=10000,
@@ -246,12 +277,13 @@ def main():
     prod_versions = load_prod_versions(args.prod_versions)
     print(f"  Found {len(prod_versions):,} records in production")
 
-    print(f"\nGenerating diff from {args.db_path}...")
+    print(f"\nGenerating diff from {args.db_path} (table: {args.table})...")
     stats = generate_diff(
         db_path=args.db_path,
         output_dir=args.output_dir,
         prod_versions=prod_versions,
         release=args.release,
+        table=args.table,
         chunk_size=args.chunk_size,
     )
 

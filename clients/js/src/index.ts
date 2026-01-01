@@ -65,6 +65,29 @@ export interface SearchOptions {
   format?: "json" | "jsonv2" | "geojson";
 }
 
+export interface ReverseOptions {
+  /** Response format */
+  format?: "jsonv2" | "geojson";
+}
+
+export interface HierarchyEntry {
+  gers_id: string;
+  subtype: string;
+  name: string;
+}
+
+export interface ReverseGeocoderResult {
+  gers_id: string;
+  primary_name: string;
+  subtype: string;
+  lat: number;
+  lon: number;
+  boundingbox: [number, number, number, number];
+  distance_km: number;
+  confidence: "exact" | "bbox" | "approximate";
+  hierarchy?: HierarchyEntry[];
+}
+
 
 export interface OvertureGeocoderConfig {
   /** API base URL (default: 'https://overture-geocoder.bradr.workers.dev') */
@@ -221,6 +244,80 @@ export class OvertureGeocoder {
     const url = `${this.baseUrl}/search?${params}`;
     const response = await this.fetchWithRetry(url);
     return response.json();
+  }
+
+  /**
+   * Reverse geocode coordinates to divisions.
+   *
+   * Returns divisions (localities, neighborhoods, counties, etc.) that
+   * contain the given coordinate. Results are sorted by specificity
+   * (smallest/most specific first).
+   */
+  async reverse(
+    lat: number,
+    lon: number,
+    options: ReverseOptions = {}
+  ): Promise<ReverseGeocoderResult[]> {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      format: options.format || "jsonv2",
+    });
+
+    const url = `${this.baseUrl}/reverse?${params}`;
+    const response = await this.fetchWithRetry(url);
+    const data = await response.json();
+
+    if (options.format === "geojson") {
+      return data as unknown as ReverseGeocoderResult[];
+    }
+
+    return this.parseReverseResults(data);
+  }
+
+  /**
+   * Reverse geocode and return results as GeoJSON FeatureCollection.
+   */
+  async reverseGeoJSON(
+    lat: number,
+    lon: number
+  ): Promise<GeoJSONFeatureCollection> {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      format: "geojson",
+    });
+
+    const url = `${this.baseUrl}/reverse?${params}`;
+    const response = await this.fetchWithRetry(url);
+    return response.json();
+  }
+
+  /**
+   * Verify if a point is inside a division's polygon.
+   *
+   * Fetches the full geometry from Overture S3 and performs
+   * a point-in-polygon check using ray casting algorithm.
+   */
+  async verifyContainsPoint(
+    gersId: string,
+    lat: number,
+    lon: number
+  ): Promise<boolean> {
+    const feature = await this.getFullGeometry(gersId);
+    if (!feature) return false;
+
+    const geometry = feature.geometry;
+    if (geometry.type === "Polygon") {
+      return this.pointInPolygon([lon, lat], geometry.coordinates[0]);
+    }
+    if (geometry.type === "MultiPolygon") {
+      return geometry.coordinates.some((poly) =>
+        this.pointInPolygon([lon, lat], poly[0])
+      );
+    }
+
+    return false;
   }
 
   /**
@@ -517,6 +614,44 @@ export class OvertureGeocoder {
     });
   }
 
+  private parseReverseResults(data: unknown): ReverseGeocoderResult[] {
+    if (!Array.isArray(data)) return [];
+
+    return data.map((r) => {
+      const record = r as Record<string, unknown>;
+      return {
+        gers_id: record.gers_id as string,
+        primary_name: record.primary_name as string,
+        subtype: record.subtype as string,
+        lat: record.lat as number,
+        lon: record.lon as number,
+        boundingbox: record.boundingbox as [number, number, number, number],
+        distance_km: record.distance_km as number,
+        confidence: record.confidence as "exact" | "bbox" | "approximate",
+        hierarchy: record.hierarchy as HierarchyEntry[] | undefined,
+      };
+    });
+  }
+
+  private pointInPolygon(
+    point: [number, number],
+    ring: [number, number][]
+  ): boolean {
+    let inside = false;
+    const [x, y] = point;
+
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+
+    return inside;
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -535,6 +670,18 @@ export async function geocode(
 ): Promise<GeocoderResult[]> {
   const client = new OvertureGeocoder();
   return client.search(query, options);
+}
+
+/**
+ * Quick reverse geocode function using default settings.
+ */
+export async function reverseGeocode(
+  lat: number,
+  lon: number,
+  options?: ReverseOptions
+): Promise<ReverseGeocoderResult[]> {
+  const client = new OvertureGeocoder();
+  return client.reverse(lat, lon, options);
 }
 
 export default OvertureGeocoder;

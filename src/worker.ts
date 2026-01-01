@@ -5,8 +5,10 @@
  */
 
 export interface Env {
-  // Global divisions database
+  // Global divisions database (forward geocoding)
   DB_DIVISIONS: D1Database;
+  // Reverse geocoding database
+  DB_DIVISIONS_REVERSE?: D1Database;
   // State-specific address databases (optional until created)
   DB_MA?: D1Database;
   // Add more states as needed:
@@ -68,6 +70,40 @@ interface DivisionRow {
   country?: string;
   region?: string;
   boosted_score: number;
+}
+
+// Reverse geocoding types
+interface ReverseGeocoderResult {
+  gers_id: string;
+  primary_name: string;
+  subtype: string;
+  lat: number;
+  lon: number;
+  boundingbox: [number, number, number, number];
+  distance_km: number;
+  confidence: "exact" | "bbox" | "approximate";
+  hierarchy?: HierarchyEntry[];
+}
+
+interface HierarchyEntry {
+  gers_id: string;
+  subtype: string;
+  name: string;
+}
+
+interface DivisionReverseRow {
+  gers_id: string;
+  subtype: string;
+  primary_name: string;
+  lat: number;
+  lon: number;
+  bbox_xmin: number;
+  bbox_ymin: number;
+  bbox_xmax: number;
+  bbox_ymax: number;
+  area: number;
+  population: number | null;
+  hierarchy_json: string | null;
 }
 
 /**
@@ -269,6 +305,170 @@ async function searchAddresses(
 }
 
 /**
+ * Haversine distance between two points in km.
+ */
+function haversineDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // Earth radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Build hierarchy from the most specific division.
+ * Uses stored hierarchy_json if available, otherwise builds from overlapping candidates.
+ */
+function buildHierarchy(
+  mostSpecific: DivisionReverseRow,
+  allCandidates: DivisionReverseRow[]
+): HierarchyEntry[] {
+  // Try stored hierarchy first
+  if (mostSpecific.hierarchy_json) {
+    try {
+      const stored = JSON.parse(mostSpecific.hierarchy_json);
+      if (Array.isArray(stored)) {
+        return stored.map((entry: { division_id?: string; id?: string; subtype: string; name: string }) => ({
+          gers_id: entry.division_id || entry.id || "",
+          subtype: entry.subtype,
+          name: entry.name,
+        }));
+      }
+    } catch {
+      // Fall through to build from candidates
+    }
+  }
+
+  // Build from overlapping candidates sorted by type priority
+  const typePriority: Record<string, number> = {
+    neighborhood: 1,
+    macrohood: 2,
+    locality: 3,
+    localadmin: 4,
+    county: 5,
+    region: 6,
+    country: 7,
+  };
+
+  return [...allCandidates]
+    .sort((a, b) => (typePriority[a.subtype] || 0) - (typePriority[b.subtype] || 0))
+    .map((div) => ({
+      gers_id: div.gers_id,
+      subtype: div.subtype,
+      name: div.primary_name,
+    }));
+}
+
+/**
+ * Handle /reverse endpoint.
+ * Returns divisions containing or near the given coordinate.
+ */
+async function handleReverse(
+  request: Request,
+  env: Env
+): Promise<Response> {
+  const url = new URL(request.url);
+
+  // Parse parameters
+  const lat = parseFloat(url.searchParams.get("lat") || "");
+  const lon = parseFloat(url.searchParams.get("lon") || "");
+  const format = url.searchParams.get("format") || "jsonv2";
+
+  // Validate coordinates
+  if (isNaN(lat) || isNaN(lon)) {
+    return jsonResponse({ error: "lat and lon parameters required" }, 400);
+  }
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return jsonResponse({ error: "Invalid coordinates" }, 400);
+  }
+
+  const db = env.DB_DIVISIONS_REVERSE;
+  if (!db) {
+    return jsonResponse({ error: "Reverse geocoding not available" }, 503);
+  }
+
+  try {
+    // Find divisions whose bbox contains the point, sorted by area (smallest first)
+    const stmt = db.prepare(`
+      SELECT
+        gers_id, subtype, primary_name,
+        lat, lon,
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+        area, population, hierarchy_json
+      FROM divisions_reverse
+      WHERE bbox_xmin <= ?
+        AND bbox_xmax >= ?
+        AND bbox_ymin <= ?
+        AND bbox_ymax >= ?
+      ORDER BY area ASC
+      LIMIT 50
+    `);
+
+    const result = await stmt.bind(lon, lon, lat, lat).all<DivisionReverseRow>();
+    const candidates = result.results || [];
+
+    if (candidates.length === 0) {
+      return jsonResponse([]);
+    }
+
+    // Build hierarchy from most specific division
+    const mostSpecific = candidates[0];
+    const hierarchy = buildHierarchy(mostSpecific, candidates);
+
+    // Format results
+    const results: ReverseGeocoderResult[] = candidates.map((div) => ({
+      gers_id: div.gers_id,
+      primary_name: div.primary_name,
+      subtype: div.subtype,
+      lat: div.lat,
+      lon: div.lon,
+      boundingbox: [div.bbox_ymin, div.bbox_ymax, div.bbox_xmin, div.bbox_xmax],
+      distance_km: Math.round(haversineDistance(lat, lon, div.lat, div.lon) * 100) / 100,
+      confidence: "bbox" as const,
+      hierarchy,
+    }));
+
+    if (format === "geojson") {
+      return jsonResponse({
+        type: "FeatureCollection",
+        features: results.map((r) => ({
+          type: "Feature",
+          id: r.gers_id,
+          properties: {
+            gers_id: r.gers_id,
+            primary_name: r.primary_name,
+            subtype: r.subtype,
+            distance_km: r.distance_km,
+            confidence: r.confidence,
+            hierarchy: r.hierarchy,
+          },
+          geometry: {
+            type: "Point",
+            coordinates: [r.lon, r.lat],
+          },
+        })),
+      });
+    }
+
+    return jsonResponse(results);
+  } catch (e) {
+    console.error("Reverse geocoding error:", e);
+    return jsonResponse({ error: "Internal error" }, 500);
+  }
+}
+
+/**
  * Handle /search endpoint.
  */
 async function handleSearch(
@@ -369,12 +569,16 @@ export default {
       case "/search":
         return handleSearch(request, env);
 
+      case "/reverse":
+        return handleReverse(request, env);
+
       case "/":
         return jsonResponse({
           name: "Overture Geocoder",
-          version: "0.1.0",
+          version: "0.2.0",
           endpoints: {
             search: "/search?q={query}",
+            reverse: "/reverse?lat={lat}&lon={lon}",
           },
           documentation: "https://github.com/bradrichardson/overture-geocode",
         });

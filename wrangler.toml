@@ -2,11 +2,17 @@ name = "overture-geocoder"
 main = "src/worker.ts"
 compatibility_date = "2024-01-01"
 
-# Global divisions database
+# Global divisions database (forward geocoding)
 [[d1_databases]]
 binding = "DB_DIVISIONS"
 database_name = "geocoder-divisions-global"
 database_id = "df77c235-54d1-4f76-b0fe-1e7a3437d0e0"
+
+# Reverse geocoding database
+[[d1_databases]]
+binding = "DB_DIVISIONS_REVERSE"
+database_name = "geocoder-divisions-reverse"
+database_id = "07908a36-a6a0-4823-8381-19996691c7d2"
 
 # State-specific address databases (uncomment when created)
 # [[d1_databases]]

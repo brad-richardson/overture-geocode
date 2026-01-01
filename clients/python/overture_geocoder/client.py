@@ -14,10 +14,12 @@ import httpx
 __all__ = [
     "OvertureGeocoder",
     "GeocoderResult",
+    "ReverseGeocoderResult",
     "GeocoderError",
     "GeocoderTimeoutError",
     "GeocoderNetworkError",
     "geocode",
+    "reverse_geocode",
 ]
 
 # =============================================================================
@@ -102,6 +104,69 @@ class GeocoderResult:
         if self._geocoder is None:
             raise ValueError("No geocoder instance - use OvertureGeocoder.search()")
         return self._geocoder.get_geometry(self.gers_id)
+
+
+@dataclass
+class HierarchyEntry:
+    """A division in the administrative hierarchy."""
+
+    gers_id: str
+    subtype: str
+    name: str
+
+
+@dataclass
+class ReverseGeocoderResult:
+    """A reverse geocoding result."""
+
+    gers_id: str
+    primary_name: str
+    subtype: str
+    lat: float
+    lon: float
+    boundingbox: list[float]
+    distance_km: float
+    confidence: str  # "exact", "bbox", or "approximate"
+    hierarchy: Optional[list[HierarchyEntry]] = None
+    _geocoder: Optional["OvertureGeocoder"] = field(default=None, repr=False)
+
+    def get_geometry(self) -> Optional[dict[str, Any]]:
+        """Fetch geometry for this result."""
+        if self._geocoder is None:
+            raise ValueError("No geocoder instance - use OvertureGeocoder.reverse()")
+        return self._geocoder.get_geometry(self.gers_id)
+
+    def verify_contains_point(self, lat: float, lon: float) -> bool:
+        """Fetch polygon from Overture S3 and verify point-in-polygon.
+
+        Uses the client-side geometry fetching to download the division's
+        polygon and check if the given point is inside it.
+
+        Args:
+            lat: Latitude to check
+            lon: Longitude to check
+
+        Returns:
+            True if point is inside the polygon, False otherwise
+        """
+        if self._geocoder is None:
+            raise ValueError("No geocoder instance")
+
+        feature = self._geocoder.get_geometry(self.gers_id)
+        if not feature:
+            return False
+
+        try:
+            from shapely.geometry import Point, shape
+        except ImportError:
+            raise ImportError(
+                "shapely required for point-in-polygon check. "
+                "Install with: pip install shapely"
+            )
+
+        polygon = shape(feature["geometry"])
+        point = Point(lon, lat)
+        return polygon.contains(point)
 
 
 @dataclass
@@ -254,6 +319,64 @@ class OvertureGeocoder:
             params["addressdetails"] = "1"
 
         response = self._request_with_retry(f"{self.base_url}/search", params=params)
+        return response.json()
+
+    def reverse(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        format: str = "jsonv2",
+    ) -> list[ReverseGeocoderResult]:
+        """Reverse geocode coordinates to divisions.
+
+        Returns divisions (localities, neighborhoods, counties, etc.) that
+        contain the given coordinate. Results are sorted by specificity
+        (smallest/most specific first).
+
+        Args:
+            lat: Latitude (-90 to 90)
+            lon: Longitude (-180 to 180)
+            format: Response format ('jsonv2', 'geojson')
+
+        Returns:
+            List of ReverseGeocoderResult objects, most specific first
+        """
+        params: dict[str, Any] = {
+            "lat": lat,
+            "lon": lon,
+            "format": format,
+        }
+
+        response = self._request_with_retry(f"{self.base_url}/reverse", params=params)
+        data = response.json()
+
+        if format == "geojson":
+            return data  # type: ignore
+
+        return self._parse_reverse_results(data)
+
+    def reverse_geojson(
+        self,
+        lat: float,
+        lon: float,
+    ) -> dict[str, Any]:
+        """Reverse geocode and return results as GeoJSON FeatureCollection.
+
+        Args:
+            lat: Latitude (-90 to 90)
+            lon: Longitude (-180 to 180)
+
+        Returns:
+            GeoJSON FeatureCollection dict
+        """
+        params: dict[str, Any] = {
+            "lat": lat,
+            "lon": lon,
+            "format": "geojson",
+        }
+
+        response = self._request_with_retry(f"{self.base_url}/reverse", params=params)
         return response.json()
 
     def get_geometry(self, gers_id: str) -> Optional[dict[str, Any]]:
@@ -429,6 +552,42 @@ class OvertureGeocoder:
 
         return results
 
+    def _parse_reverse_results(
+        self, data: list[dict[str, Any]]
+    ) -> list[ReverseGeocoderResult]:
+        """Parse reverse geocoding API response into ReverseGeocoderResult objects."""
+        if not isinstance(data, list):
+            return []
+
+        results = []
+        for r in data:
+            hierarchy = None
+            if "hierarchy" in r and r["hierarchy"]:
+                hierarchy = [
+                    HierarchyEntry(
+                        gers_id=h.get("gers_id", ""),
+                        subtype=h.get("subtype", ""),
+                        name=h.get("name", ""),
+                    )
+                    for h in r["hierarchy"]
+                ]
+
+            result = ReverseGeocoderResult(
+                gers_id=r["gers_id"],
+                primary_name=r["primary_name"],
+                subtype=r["subtype"],
+                lat=float(r["lat"]),
+                lon=float(r["lon"]),
+                boundingbox=[float(b) for b in r["boundingbox"]],
+                distance_km=float(r["distance_km"]),
+                confidence=r["confidence"],
+                hierarchy=hierarchy,
+                _geocoder=self,
+            )
+            results.append(result)
+
+        return results
+
 
 # =============================================================================
 # Convenience functions
@@ -447,3 +606,18 @@ def geocode(query: str, **kwargs: Any) -> list[GeocoderResult]:
     """
     with OvertureGeocoder() as client:
         return client.search(query, **kwargs)
+
+
+def reverse_geocode(lat: float, lon: float, **kwargs: Any) -> list[ReverseGeocoderResult]:
+    """Quick reverse geocode function using default settings.
+
+    Args:
+        lat: Latitude (-90 to 90)
+        lon: Longitude (-180 to 180)
+        **kwargs: Additional arguments passed to reverse()
+
+    Returns:
+        List of ReverseGeocoderResult objects
+    """
+    with OvertureGeocoder() as client:
+        return client.reverse(lat, lon, **kwargs)

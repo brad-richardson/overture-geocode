@@ -132,6 +132,50 @@ CREATE INDEX idx_type ON features(type);
 """
 
 
+def get_divisions_reverse_schema() -> str:
+    """Return the divisions_reverse table schema for reverse geocoding."""
+    return """-- Divisions reverse table schema for D1 (reverse geocoding)
+DROP TABLE IF EXISTS divisions_reverse;
+
+CREATE TABLE divisions_reverse (
+    rowid INTEGER PRIMARY KEY,
+    gers_id TEXT NOT NULL UNIQUE,
+    version INTEGER NOT NULL DEFAULT 0,
+    subtype TEXT NOT NULL,
+    primary_name TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    bbox_xmin REAL NOT NULL,
+    bbox_ymin REAL NOT NULL,
+    bbox_xmax REAL NOT NULL,
+    bbox_ymax REAL NOT NULL,
+    area REAL,
+    population INTEGER,
+    country TEXT,
+    region TEXT,
+    parent_division_id TEXT,
+    hierarchy_json TEXT
+);
+
+-- Metadata table
+CREATE TABLE IF NOT EXISTS metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Spatial indexes for bbox queries
+CREATE INDEX idx_bbox_xmin ON divisions_reverse(bbox_xmin);
+CREATE INDEX idx_bbox_xmax ON divisions_reverse(bbox_xmax);
+CREATE INDEX idx_bbox_ymin ON divisions_reverse(bbox_ymin);
+CREATE INDEX idx_bbox_ymax ON divisions_reverse(bbox_ymax);
+
+-- Additional indexes
+CREATE INDEX idx_subtype ON divisions_reverse(subtype);
+CREATE INDEX idx_country ON divisions_reverse(country);
+CREATE INDEX idx_area ON divisions_reverse(area);
+"""
+
+
 def escape_sql_string(s: str) -> str:
     """Escape a string for SQL by doubling single quotes."""
     if s is None:
@@ -174,6 +218,14 @@ def export_to_sql(
             "gers_id", "version", "type", "primary_name", "lat", "lon",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
             "population", "country", "region", "search_text"
+        ]
+    elif table == "divisions_reverse":
+        schema = get_divisions_reverse_schema()
+        columns = [
+            "gers_id", "version", "subtype", "primary_name", "lat", "lon",
+            "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+            "area", "population", "country", "region",
+            "parent_division_id", "hierarchy_json"
         ]
     else:
         schema = get_features_schema()
@@ -271,7 +323,7 @@ def main():
     parser.add_argument(
         "--table",
         default="divisions",
-        choices=["divisions", "features"],
+        choices=["divisions", "divisions_reverse", "features"],
         help="Table to export (default: divisions)"
     )
     parser.add_argument(

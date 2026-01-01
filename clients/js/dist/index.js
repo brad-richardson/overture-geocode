@@ -17675,7 +17675,8 @@ __export(index_exports, {
   findRegistryFile: () => findRegistryFile,
   geocode: () => geocode,
   getLatestRelease: () => getLatestRelease,
-  getStacCatalog: () => getStacCatalog
+  getStacCatalog: () => getStacCatalog,
+  reverseGeocode: () => reverseGeocode
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -17815,6 +17816,60 @@ var OvertureGeocoder = class {
     const url = `${this.baseUrl}/search?${params}`;
     const response = await this.fetchWithRetry(url);
     return response.json();
+  }
+  /**
+   * Reverse geocode coordinates to divisions.
+   *
+   * Returns divisions (localities, neighborhoods, counties, etc.) that
+   * contain the given coordinate. Results are sorted by specificity
+   * (smallest/most specific first).
+   */
+  async reverse(lat, lon, options = {}) {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      format: options.format || "jsonv2"
+    });
+    const url = `${this.baseUrl}/reverse?${params}`;
+    const response = await this.fetchWithRetry(url);
+    const data = await response.json();
+    if (options.format === "geojson") {
+      return data;
+    }
+    return this.parseReverseResults(data);
+  }
+  /**
+   * Reverse geocode and return results as GeoJSON FeatureCollection.
+   */
+  async reverseGeoJSON(lat, lon) {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+      format: "geojson"
+    });
+    const url = `${this.baseUrl}/reverse?${params}`;
+    const response = await this.fetchWithRetry(url);
+    return response.json();
+  }
+  /**
+   * Verify if a point is inside a division's polygon.
+   *
+   * Fetches the full geometry from Overture S3 and performs
+   * a point-in-polygon check using ray casting algorithm.
+   */
+  async verifyContainsPoint(gersId, lat, lon) {
+    const feature = await this.getFullGeometry(gersId);
+    if (!feature) return false;
+    const geometry = feature.geometry;
+    if (geometry.type === "Polygon") {
+      return this.pointInPolygon([lon, lat], geometry.coordinates[0]);
+    }
+    if (geometry.type === "MultiPolygon") {
+      return geometry.coordinates.some(
+        (poly) => this.pointInPolygon([lon, lat], poly[0])
+      );
+    }
+    return false;
   }
   /**
    * Get the base URL configured for this client.
@@ -18037,6 +18092,35 @@ var OvertureGeocoder = class {
       };
     });
   }
+  parseReverseResults(data) {
+    if (!Array.isArray(data)) return [];
+    return data.map((r) => {
+      const record = r;
+      return {
+        gers_id: record.gers_id,
+        primary_name: record.primary_name,
+        subtype: record.subtype,
+        lat: record.lat,
+        lon: record.lon,
+        boundingbox: record.boundingbox,
+        distance_km: record.distance_km,
+        confidence: record.confidence,
+        hierarchy: record.hierarchy
+      };
+    });
+  }
+  pointInPolygon(point, ring) {
+    let inside = false;
+    const [x, y] = point;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      if (yi > y !== yj > y && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
   delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -18044,6 +18128,10 @@ var OvertureGeocoder = class {
 async function geocode(query, options) {
   const client = new OvertureGeocoder();
   return client.search(query, options);
+}
+async function reverseGeocode(lat, lon, options) {
+  const client = new OvertureGeocoder();
+  return client.reverse(lat, lon, options);
 }
 var index_default = OvertureGeocoder;
 // Annotate the CommonJS export names for ESM import in node:
@@ -18056,5 +18144,6 @@ var index_default = OvertureGeocoder;
   findRegistryFile,
   geocode,
   getLatestRelease,
-  getStacCatalog
+  getStacCatalog,
+  reverseGeocode
 });
