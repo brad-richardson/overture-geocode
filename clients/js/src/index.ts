@@ -13,8 +13,17 @@ import {
   type GersRegistry,
 } from "./stac";
 
-// Re-export STAC utilities for advanced usage
-export { getStacCatalog, findRegistryFile, getLatestRelease, clearCatalogCache } from "./stac";
+// Re-export STAC utilities and types for advanced usage
+export {
+  getStacCatalog,
+  findRegistryFile,
+  getLatestRelease,
+  clearCatalogCache,
+  type StacCatalog,
+  type StacLink,
+  type GersRegistry,
+  type RegistryEntry,
+} from "./stac";
 
 // ============================================================================
 // Types

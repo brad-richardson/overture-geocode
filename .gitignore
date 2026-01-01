@@ -11,6 +11,9 @@ env/
 dist/
 build/
 
+# Exception: JS client dist (needed for GitHub installation)
+!clients/js/dist/
+
 # DuckDB
 *.duckdb
 *.duckdb.wal
