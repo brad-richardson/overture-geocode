@@ -182,6 +182,13 @@ def generate_diff(
         f.write(f"INSERT OR REPLACE INTO metadata (key, value) VALUES ('overture_release', {escape_sql_string(release)});\n")
         f.write(f"INSERT OR REPLACE INTO metadata (key, value) VALUES ('updated_at', datetime('now'));\n")
 
+    # Calculate destructive change percentage
+    prod_count = len(prod_versions)
+    if prod_count > 0:
+        stats["prod_count"] = prod_count
+        stats["destructive_changes"] = stats["updates"] + stats["deletes"]
+        stats["destructive_pct"] = round(100 * stats["destructive_changes"] / prod_count, 2)
+
     # Write stats
     stats_file = output_dir / "stats.json"
     with open(stats_file, "w") as f:
@@ -221,6 +228,17 @@ def main():
         default=10000,
         help="Commit every N records (default: 10000)"
     )
+    parser.add_argument(
+        "--max-change-pct",
+        type=float,
+        default=5.0,
+        help="Maximum allowed change percentage (updates + deletes) before aborting (default: 5.0)"
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip the safety check and allow any change percentage"
+    )
 
     args = parser.parse_args()
 
@@ -250,6 +268,17 @@ def main():
     else:
         pct = 100 * changes / max(stats['total_new'], 1)
         print(f"\n  Total changes: {changes:,} ({pct:.2f}% of data)")
+
+    # Safety check: ensure updates + deletes don't exceed threshold
+    # (inserts are generally safe - they're new data)
+    if "destructive_pct" in stats:
+        print(f"\n  Destructive changes (updates + deletes): {stats['destructive_changes']:,} ({stats['destructive_pct']:.2f}% of production)")
+
+        if stats["destructive_pct"] > args.max_change_pct and not args.force:
+            print(f"\n❌ SAFETY CHECK FAILED: Destructive changes ({stats['destructive_pct']:.2f}%) exceed threshold ({args.max_change_pct}%)")
+            print(f"   This could indicate a data issue or schema change.")
+            print(f"   Use --force to override, or --max-change-pct to adjust the threshold.")
+            return 1
 
     print(f"\nOutput files:")
     print(f"  {args.output_dir}/upserts.sql")
