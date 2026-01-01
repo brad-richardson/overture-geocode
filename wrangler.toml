@@ -8,11 +8,11 @@ binding = "DB_DIVISIONS"
 database_name = "geocoder-divisions-global"
 database_id = "df77c235-54d1-4f76-b0fe-1e7a3437d0e0"
 
-# State-specific address databases
-[[d1_databases]]
-binding = "DB_MA"
-database_name = "geocoder-us-ma"
-database_id = "local-dev"
+# State-specific address databases (uncomment when created)
+# [[d1_databases]]
+# binding = "DB_MA"
+# database_name = "geocoder-us-ma"
+# database_id = "your-database-id-here"
 
 # Uncomment for R2 geometry cache:
 # [[r2_buckets]]

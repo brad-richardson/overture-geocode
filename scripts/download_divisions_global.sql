@@ -49,8 +49,7 @@ COPY (
         -- Search text includes all name variants for multilingual search
         LOWER(CONCAT_WS(' ',
             names.primary,
-            ARRAY_TO_STRING(MAP_VALUES(names.common), ' '),
-            ARRAY_TO_STRING(names.alternate, ' ')
+            COALESCE(ARRAY_TO_STRING(MAP_VALUES(names.common), ' '), '')
         )) as search_text
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/2025-12-17.0/theme=divisions/type=division/*',

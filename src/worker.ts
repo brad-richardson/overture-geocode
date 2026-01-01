@@ -7,11 +7,11 @@
 export interface Env {
   // Global divisions database
   DB_DIVISIONS: D1Database;
-  // State-specific address databases
-  DB_MA: D1Database;
+  // State-specific address databases (optional until created)
+  DB_MA?: D1Database;
   // Add more states as needed:
-  // DB_CA: D1Database;
-  // DB_TX: D1Database;
+  // DB_CA?: D1Database;
+  // DB_TX?: D1Database;
 }
 
 interface GeocoderResult {
