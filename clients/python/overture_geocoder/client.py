@@ -171,7 +171,6 @@ class OvertureGeocoder:
             timeout=timeout,
             headers={"Accept": "application/json", **self.headers},
         )
-        self._duckdb = None
 
     def search(
         self,
@@ -316,9 +315,13 @@ class OvertureGeocoder:
         return response.json()
 
     def get_geometry(self, gers_id: str) -> Optional[dict[str, Any]]:
-        """Fetch full geometry from Overture S3 via DuckDB.
+        """Fetch full geometry from Overture S3 via the overturemaps-py library.
 
-        Note: Requires `duckdb` package: pip install overture-geocoder[geometry]
+        Uses the GERS registry for efficient lookup - only downloads the specific
+        parquet file containing the requested feature.
+
+        Note: Requires `overturemaps` and `shapely` packages:
+            pip install overture-geocoder[geometry]
 
         Args:
             gers_id: The GERS ID to look up
@@ -326,56 +329,57 @@ class OvertureGeocoder:
         Returns:
             GeoJSON Feature dict or None if not found
         """
-        if self._duckdb is None:
-            try:
-                import duckdb
-            except ImportError:
-                raise ImportError(
-                    "DuckDB required for geometry fetching. "
-                    "Install with: pip install overture-geocoder[geometry]"
-                )
-            self._duckdb = duckdb.connect()
-            self._duckdb.execute("INSTALL httpfs; LOAD httpfs;")
-            self._duckdb.execute("INSTALL spatial; LOAD spatial;")
-            self._duckdb.execute("SET s3_region = 'us-west-2';")
-
-        result = self._duckdb.execute(
-            f"""
-            SELECT
-                id,
-                ST_AsGeoJSON(geometry) as geometry,
-                country,
-                postcode,
-                street,
-                number,
-                unit,
-                address_levels
-            FROM read_parquet(
-                's3://overturemaps-us-west-2/release/{self.overture_release}/theme=addresses/type=address/*'
+        try:
+            import overturemaps
+        except ImportError:
+            raise ImportError(
+                "overturemaps required for geometry fetching. "
+                "Install with: pip install overture-geocoder[geometry]"
             )
-            WHERE id = ?
-            LIMIT 1
-            """,
-            [gers_id],
-        ).fetchone()
 
-        if result:
-            import json
+        # Use the GERS registry lookup (handles STAC/binary search internally)
+        reader = overturemaps.record_batch_reader_from_gers(gers_id)
+        if reader is None:
+            return None
 
-            return {
-                "type": "Feature",
-                "id": result[0],
-                "geometry": json.loads(result[1]),
-                "properties": {
-                    "country": result[2],
-                    "postcode": result[3],
-                    "street": result[4],
-                    "number": result[5],
-                    "unit": result[6],
-                    "address_levels": result[7],
-                },
-            }
-        return None
+        table = reader.read_all()
+        if len(table) == 0:
+            return None
+
+        # Convert to GeoJSON Feature
+        import json
+
+        try:
+            import shapely
+            from shapely import from_wkb, to_geojson
+        except ImportError:
+            raise ImportError(
+                "shapely required for geometry conversion. "
+                "Install with: pip install overture-geocoder[geometry]"
+            )
+
+        row = table.to_pydict()
+        geometry_wkb = row["geometry"][0]
+
+        # Convert WKB to GeoJSON
+        geom = from_wkb(geometry_wkb)
+
+        # Build properties from all columns except geometry
+        properties = {}
+        for k, v in row.items():
+            if k != "geometry" and v:
+                val = v[0]
+                # Handle pyarrow types
+                if hasattr(val, "as_py"):
+                    val = val.as_py()
+                properties[k] = val
+
+        return {
+            "type": "Feature",
+            "id": gers_id,
+            "geometry": json.loads(to_geojson(geom)),
+            "properties": properties,
+        }
 
     def get_base_url(self) -> str:
         """Get the base URL configured for this client."""
@@ -389,8 +393,6 @@ class OvertureGeocoder:
         """Close HTTP client and release resources."""
         if self._owns_client:
             self._http.close()
-        if self._duckdb is not None:
-            self._duckdb.close()
 
     def __enter__(self) -> "OvertureGeocoder":
         return self

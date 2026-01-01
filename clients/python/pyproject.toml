@@ -29,7 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 geometry = [
-    "duckdb>=1.0.0",
+    "overturemaps>=0.8.0",
+    "shapely>=2.0.0",
 ]
 dev = [
     "pytest>=7.0.0",

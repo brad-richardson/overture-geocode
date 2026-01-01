@@ -6,6 +6,7 @@ import {
   GeocoderNetworkError,
   geocode,
   lookup,
+  clearCatalogCache,
 } from "./index";
 
 // Mock response data
@@ -525,5 +526,83 @@ describe("convenience functions", () => {
     expect(results).toHaveLength(1);
 
     vi.unstubAllGlobals();
+  });
+});
+
+// Mock STAC catalog for geometry tests
+const mockStacCatalog = {
+  id: "overturemaps",
+  type: "Catalog",
+  links: [],
+  registry: {
+    path: "release/2025-12-17.0/gers",
+    manifest: [
+      ["000.parquet", "0fffffff-ffff-ffff-ffff-ffffffffffff"],
+      ["001.parquet", "1fffffff-ffff-ffff-ffff-ffffffffffff"],
+      ["00f.parquet", "ffffffff-ffff-ffff-ffff-ffffffffffff"],
+    ] as [string, string][],
+  },
+};
+
+describe("getFullGeometry", () => {
+  beforeEach(() => {
+    clearCatalogCache();
+  });
+
+  it("should return null when GERS ID is not in manifest", async () => {
+    // Catalog with limited range - ID starting with 'z' won't be found
+    const limitedCatalog = {
+      ...mockStacCatalog,
+      registry: {
+        path: "release/2025-12-17.0/gers",
+        manifest: [["000.parquet", "0fffffff-ffff-ffff-ffff-ffffffffffff"]] as [string, string][],
+      },
+    };
+
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes("stac.overturemaps.org")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(limitedCatalog),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([]),
+      });
+    });
+
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    // This ID starts with 'f' which is beyond the max 'z' in the manifest
+    const result = await client.getFullGeometry("f0000000-0000-0000-0000-000000000000");
+    expect(result).toBeNull();
+  });
+
+  it("should throw when GERS registry not in catalog", async () => {
+    const catalogWithoutRegistry = {
+      id: "overturemaps",
+      type: "Catalog",
+      links: [],
+      // No registry field
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(catalogWithoutRegistry),
+    });
+
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    await expect(
+      client.getFullGeometry("abc-123")
+    ).rejects.toThrow("GERS registry not found in STAC catalog");
+  });
+
+  it("should close DuckDB resources", async () => {
+    const client = new OvertureGeocoder();
+
+    // close() should not throw even if DuckDB was never initialized
+    await expect(client.close()).resolves.not.toThrow();
   });
 });
