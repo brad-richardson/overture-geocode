@@ -17,7 +17,7 @@
 - [x] Implement FTS5 query with BM25 ranking
 - [ ] Add query parameter parsing (limit, viewbox, bounded)
 - [ ] Deploy to Cloudflare Workers
-- [ ] Upload MA index to D1
+- [ ] Upload MA index to D1 (see D1 Data Sync section)
 
 ### Divisions Support (Priority!)
 - [x] Add STAC client for dynamic release discovery
@@ -73,6 +73,14 @@
 - [x] Add STAC client (`stac.overturemaps.org`) for dynamic release discovery
 - [ ] Auto-detect latest Overture release in scripts
 - [x] Set up GitHub Actions for CI/CD
+
+### D1 Data Sync
+- [x] Add SQL export script with chunked output (`scripts/export_to_sql.py`)
+- [x] Add UNIQUE constraint on gers_id for upsert support
+- [x] Add FTS5 triggers for automatic index updates
+- [ ] Add --diff mode to export script (fetch remote GERS IDs, export only new records)
+- [ ] Add content hash column for detecting changed records
+- [ ] Paginated GERS ID fetch for large databases
 
 ## Stretch Goals
 
