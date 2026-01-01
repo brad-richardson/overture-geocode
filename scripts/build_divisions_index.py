@@ -46,7 +46,7 @@ def build_divisions_index(
     db.execute("""
         CREATE TABLE divisions (
             rowid INTEGER PRIMARY KEY,
-            gers_id TEXT NOT NULL,
+            gers_id TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,
             display_name TEXT NOT NULL,
             lat REAL NOT NULL,
@@ -69,6 +69,28 @@ def build_divisions_index(
             content_rowid=rowid,
             tokenize='porter unicode61 remove_diacritics 1'
         )
+    """)
+
+    # Create triggers for FTS sync (needed for INSERT OR REPLACE)
+    db.execute("""
+        CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN
+            INSERT INTO divisions_fts(rowid, search_text)
+            VALUES (new.rowid, LOWER(new.display_name));
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN
+            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
+            VALUES ('delete', old.rowid, LOWER(old.display_name));
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN
+            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
+            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            INSERT INTO divisions_fts(rowid, search_text)
+            VALUES (new.rowid, LOWER(new.display_name));
+        END
     """)
 
     # Read and insert divisions
@@ -134,8 +156,7 @@ def build_divisions_index(
 
 
 def _insert_batch(db: sqlite3.Connection, batch: list):
-    """Insert a batch of divisions and their FTS entries."""
-    # Insert into main table
+    """Insert a batch of divisions. FTS is updated via triggers."""
     db.executemany(
         """
         INSERT INTO divisions (
@@ -145,16 +166,6 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]) for r in batch],
-    )
-
-    # Get last rowid range
-    last_rowid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    first_rowid = last_rowid - len(batch) + 1
-
-    # Insert into FTS table
-    db.executemany(
-        "INSERT INTO divisions_fts(rowid, search_text) VALUES (?, ?)",
-        [(first_rowid + i, batch[i][12]) for i in range(len(batch))],
     )
 
 

@@ -43,7 +43,7 @@ def build_fts_index(
     db.execute("""
         CREATE TABLE features (
             rowid INTEGER PRIMARY KEY,
-            gers_id TEXT NOT NULL,
+            gers_id TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,          -- 'address', 'locality', 'neighborhood', etc.
             display_name TEXT NOT NULL,
             lat REAL NOT NULL,
@@ -67,6 +67,28 @@ def build_fts_index(
             content_rowid=rowid,
             tokenize='porter unicode61 remove_diacritics 1'
         )
+    """)
+
+    # Create triggers for FTS sync (needed for INSERT OR REPLACE)
+    db.execute("""
+        CREATE TRIGGER features_ai AFTER INSERT ON features BEGIN
+            INSERT INTO features_fts(rowid, search_text)
+            VALUES (new.rowid, LOWER(new.display_name));
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER features_ad AFTER DELETE ON features BEGIN
+            INSERT INTO features_fts(features_fts, rowid, search_text)
+            VALUES ('delete', old.rowid, LOWER(old.display_name));
+        END
+    """)
+    db.execute("""
+        CREATE TRIGGER features_au AFTER UPDATE ON features BEGIN
+            INSERT INTO features_fts(features_fts, rowid, search_text)
+            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            INSERT INTO features_fts(rowid, search_text)
+            VALUES (new.rowid, LOWER(new.display_name));
+        END
     """)
 
     # Insert divisions first (they should rank higher)
@@ -176,8 +198,7 @@ def build_fts_index(
 
 
 def _insert_batch(db: sqlite3.Connection, batch: list):
-    """Insert a batch of features and their FTS entries."""
-    # Insert into main table
+    """Insert a batch of features. FTS is updated via triggers."""
     db.executemany(
         """
         INSERT INTO features (
@@ -187,16 +208,6 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12]) for r in batch],
-    )
-
-    # Get last rowid range
-    last_rowid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    first_rowid = last_rowid - len(batch) + 1
-
-    # Insert into FTS table
-    db.executemany(
-        "INSERT INTO features_fts(rowid, search_text) VALUES (?, ?)",
-        [(first_rowid + i, batch[i][13]) for i in range(len(batch))],
     )
 
 
