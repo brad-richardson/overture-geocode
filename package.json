@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --persist-to=.wrangler/local-state",
+    "setup-db": "bash scripts/setup-local-db.sh",
     "deploy": "wrangler deploy",
     "d1:create": "wrangler d1 create geocoder-us-ma",
     "d1:upload": "wrangler d1 execute geocoder-us-ma --file=indexes/US-MA.sql",
