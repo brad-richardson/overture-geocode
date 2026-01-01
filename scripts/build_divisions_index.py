@@ -42,11 +42,20 @@ def build_divisions_index(
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA cache_size=-128000")  # 128MB cache
 
+    # Create metadata table
+    db.execute("""
+        CREATE TABLE metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
     # Create table for divisions
     db.execute("""
         CREATE TABLE divisions (
             rowid INTEGER PRIMARY KEY,
             gers_id TEXT NOT NULL UNIQUE,
+            version INTEGER NOT NULL DEFAULT 0,
             type TEXT NOT NULL,
             primary_name TEXT NOT NULL,
             lat REAL NOT NULL,
@@ -104,6 +113,7 @@ def build_divisions_index(
     cursor = con.execute(f"""
         SELECT
             gers_id,
+            version,
             subtype as type,
             primary_name,
             lat,
@@ -161,12 +171,12 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
     db.executemany(
         """
         INSERT INTO divisions (
-            gers_id, type, primary_name, lat, lon,
+            gers_id, version, type, primary_name, lat, lon,
             bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
             population, country, region, search_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12]) for r in batch],
+        batch,
     )
 
 

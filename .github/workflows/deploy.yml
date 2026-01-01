@@ -3,14 +3,69 @@ name: Deploy
 on:
   push:
     branches: [main]
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
+    inputs:
+      force_data_update:
+        description: 'Force data update even if release unchanged'
+        type: boolean
+        default: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
   test:
     uses: ./.github/workflows/ci.yml
 
-  build-index:
+  check-release:
     needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      overture_release: ${{ steps.check.outputs.overture_release }}
+      prod_release: ${{ steps.check.outputs.prod_release }}
+      release_changed: ${{ steps.check.outputs.release_changed }}
+      needs_update: ${{ steps.decide.outputs.needs_update }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Overture release
+        id: check
+        run: |
+          chmod +x scripts/check_release.sh
+          ./scripts/check_release.sh
+
+      - name: Decide if update needed
+        id: decide
+        run: |
+          if [ "${{ github.event.inputs.force_data_update }}" = "true" ]; then
+            echo "Force update requested"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.check.outputs.release_changed }}" = "true" ]; then
+            echo "Release changed, update needed"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update needed"
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-and-diff:
+    needs: check-release
+    if: needs.check-release.outputs.needs_update == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,23 +85,78 @@ jobs:
       - name: Install Python dependencies
         run: pip install duckdb
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install npm dependencies
+        run: npm ci
+
       - name: Download global divisions from Overture
-        run: ./scripts/download_divisions.sh
+        run: |
+          chmod +x scripts/download_divisions.sh
+          ./scripts/download_divisions.sh "${{ needs.check-release.outputs.overture_release }}"
 
       - name: Build divisions index
         run: |
           mkdir -p indexes
           python scripts/build_divisions_index.py
 
-      - name: Upload index artifact
+      - name: Fetch production versions
+        run: |
+          chmod +x scripts/fetch_prod_versions.sh
+          ./scripts/fetch_prod_versions.sh prod_versions.csv
+
+      - name: Generate differential update
+        run: |
+          python scripts/diff_and_update.py \
+            indexes/divisions-global.db \
+            exports/diff \
+            --prod-versions prod_versions.csv \
+            --release "${{ needs.check-release.outputs.overture_release }}"
+
+          # Show stats
+          cat exports/diff/stats.json
+
+      - name: Check if changes exist
+        id: changes
+        run: |
+          INSERTS=$(jq '.inserts' exports/diff/stats.json)
+          UPDATES=$(jq '.updates' exports/diff/stats.json)
+          DELETES=$(jq '.deletes' exports/diff/stats.json)
+          TOTAL=$((INSERTS + UPDATES + DELETES))
+
+          echo "Total changes: $TOTAL (inserts: $INSERTS, updates: $UPDATES, deletes: $DELETES)"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload diff artifacts
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-sql
+          path: exports/diff/
+          retention-days: 1
+
+      - name: Upload full index (for fallback)
         uses: actions/upload-artifact@v4
         with:
           name: divisions-index
           path: indexes/divisions-global.db
           retention-days: 1
 
-  deploy:
-    needs: test  # Change to build-index when D1 upload is enabled
+    outputs:
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+
+  apply-updates:
+    needs: [check-release, build-and-diff]
+    if: needs.build-and-diff.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,41 +170,111 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # - name: Download index artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: divisions-index
-      #     path: indexes/
-      #
-      # - name: Set up Python
-      #   uses: actions/setup-python@v5
-      #   with:
-      #     python-version: "3.11"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      # D1 database upload steps (uncomment when ready to deploy data)
-      # - name: Export to chunked SQL files
-      #   run: |
-      #     mkdir -p exports/divisions
-      #     python scripts/export_to_sql.py indexes/divisions-global.db exports/divisions --table divisions
-      #
-      # - name: Upload schema to D1
-      #   run: npx wrangler d1 execute geocoder-divisions-global --remote --file=exports/divisions/schema.sql
-      #   env:
-      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #
-      # - name: Upload data chunks to D1
-      #   run: |
-      #     for file in exports/divisions/data-*.sql; do
-      #       echo "Uploading $file..."
-      #       npx wrangler d1 execute geocoder-divisions-global --remote --file="$file"
-      #     done
-      #   env:
-      #     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      #     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Download diff artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: diff-sql
+          path: exports/diff/
+
+      - name: Download full index (for initial deployment)
+        uses: actions/download-artifact@v4
+        with:
+          name: divisions-index
+          path: indexes/
+
+      - name: Show diff stats
+        run: cat exports/diff/stats.json
+
+      - name: Check if initial deployment needed
+        id: check-initial
+        run: |
+          INSERTS=$(jq '.inserts' exports/diff/stats.json)
+          UNCHANGED=$(jq '.unchanged' exports/diff/stats.json)
+
+          # If all records are inserts and none unchanged, this is initial deployment
+          if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -gt 100000 ]; then
+            echo "Initial deployment detected (all records are new)"
+            echo "initial_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Incremental update"
+            echo "initial_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply schema (initial deployment)
+        if: steps.check-initial.outputs.initial_deploy == 'true'
+        run: |
+          echo "Creating schema for initial deployment..."
+          python scripts/export_to_sql.py \
+            indexes/divisions-global.db \
+            exports/full \
+            --table divisions
+
+          echo "Applying schema..."
+          npx wrangler d1 execute geocoder-divisions-global --remote \
+            --file=exports/full/schema.sql
+
+      - name: Apply full data (initial deployment)
+        if: steps.check-initial.outputs.initial_deploy == 'true'
+        run: |
+          echo "Uploading full data..."
+          for file in exports/full/data-*.sql; do
+            echo "Uploading $file..."
+            npx wrangler d1 execute geocoder-divisions-global --remote \
+              --file="$file"
+          done
+
+      - name: Apply upserts to D1 (incremental)
+        if: steps.check-initial.outputs.initial_deploy == 'false'
+        run: |
+          echo "Applying upserts..."
+          npx wrangler d1 execute geocoder-divisions-global --remote \
+            --file=exports/diff/upserts.sql
+
+      - name: Apply deletes to D1 (incremental)
+        if: steps.check-initial.outputs.initial_deploy == 'false'
+        run: |
+          echo "Applying deletes..."
+          npx wrangler d1 execute geocoder-divisions-global --remote \
+            --file=exports/diff/deletes.sql
+
+      - name: Update metadata
+        run: |
+          echo "Updating release metadata..."
+          npx wrangler d1 execute geocoder-divisions-global --remote \
+            --file=exports/diff/metadata.sql
+
+      - name: Verify update
+        run: |
+          echo "Verifying update..."
+          npx wrangler d1 execute geocoder-divisions-global --remote \
+            --command "SELECT * FROM metadata" --json
+
+  deploy-worker:
+    needs: [test, check-release, build-and-diff, apply-updates]
+    # Run if: tests passed AND (no update needed OR updates applied successfully)
+    if: |
+      always() &&
+      needs.test.result == 'success' &&
+      (needs.check-release.outputs.needs_update == 'false' ||
+       needs.apply-updates.result == 'success' ||
+       needs.apply-updates.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Deploy Worker
         run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

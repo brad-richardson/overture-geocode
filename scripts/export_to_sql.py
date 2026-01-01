@@ -22,10 +22,17 @@ def get_divisions_schema() -> str:
     return """-- Divisions table schema for D1
 DROP TABLE IF EXISTS divisions_fts;
 DROP TABLE IF EXISTS divisions;
+DROP TABLE IF EXISTS metadata;
+
+CREATE TABLE metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 
 CREATE TABLE divisions (
     rowid INTEGER PRIMARY KEY,
     gers_id TEXT NOT NULL UNIQUE,
+    version INTEGER NOT NULL DEFAULT 0,
     type TEXT NOT NULL,
     primary_name TEXT NOT NULL,
     lat REAL NOT NULL,
@@ -164,7 +171,7 @@ def export_to_sql(
     if table == "divisions":
         schema = get_divisions_schema()
         columns = [
-            "gers_id", "type", "primary_name", "lat", "lon",
+            "gers_id", "version", "type", "primary_name", "lat", "lon",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
             "population", "country", "region", "search_text"
         ]
