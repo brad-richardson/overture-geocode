@@ -80,19 +80,24 @@ const geometry = await geocoder.getFullGeometry(results[0].gers_id);
 
 ### Manual Triggers
 
-The deploy workflow supports manual triggers via GitHub Actions:
+Two workflows are available for manual triggers:
+
+**Deploy Workflow** (incremental, zero-downtime):
 
 | Input | Description |
 |-------|-------------|
-| `force_data_update` | Force data update even if Overture release unchanged |
-| `force_schema_rebuild` | Force rebuild with current release |
-| `force_full_rebuild` | **Drop and recreate all tables** with fresh data (use after schema/logic changes) |
+| `force_all_upserts` | Force ALL records to be upserted (for logic/FTS changes) |
 
-To trigger a full rebuild after changing search logic:
-1. Go to **Actions** → **Deploy**
-2. Click **Run workflow**
-3. Check **"Force full rebuild"**
-4. Click **Run workflow**
+Use this when you've changed search ranking, FTS text generation, or other logic that affects existing records. The service remains available throughout.
+
+**Schema Rebuild Workflow** (destructive, causes downtime):
+
+| Input | Description |
+|-------|-------------|
+| `database` | Which database to rebuild (forward, reverse, or both) |
+| `confirm` | Type "REBUILD" to confirm the destructive operation |
+
+Use this only when schema changes are required (adding/removing columns, changing indexes). The service will be unavailable during rebuild (1-2 hours for full dataset).
 
 ## Architecture
 

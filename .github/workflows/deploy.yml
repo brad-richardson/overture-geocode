@@ -5,16 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      force_data_update:
-        description: 'Force data update even if release unchanged'
-        type: boolean
-        default: false
-      force_schema_rebuild:
-        description: 'Force rebuild with current release (for schema/SQL changes)'
-        type: boolean
-        default: false
-      force_full_rebuild:
-        description: 'Force full rebuild (drop + recreate tables with all data)'
+      force_all_upserts:
+        description: 'Force ALL records to be upserted (for logic/FTS changes)'
         type: boolean
         default: false
 
@@ -34,7 +26,7 @@ jobs:
       prod_release: ${{ steps.check.outputs.prod_release }}
       release_changed: ${{ steps.check.outputs.release_changed }}
       needs_update: ${{ steps.decide.outputs.needs_update }}
-      force_full_rebuild: ${{ steps.decide.outputs.force_full_rebuild }}
+      force_all_upserts: ${{ steps.decide.outputs.force_all_upserts }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,24 +60,18 @@ jobs:
       - name: Decide if update needed
         id: decide
         run: |
-          # Check if force full rebuild requested
-          if [ "${{ github.event.inputs.force_full_rebuild }}" = "true" ]; then
-            echo "Force full rebuild requested"
+          if [ "${{ github.event.inputs.force_all_upserts }}" = "true" ]; then
+            echo "Force all upserts requested"
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
-            echo "force_full_rebuild=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.inputs.force_data_update }}" = "true" ] || \
-               [ "${{ github.event.inputs.force_schema_rebuild }}" = "true" ]; then
-            echo "Force update requested"
-            echo "needs_update=true" >> "$GITHUB_OUTPUT"
-            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
+            echo "force_all_upserts=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.check.outputs.release_changed }}" = "true" ]; then
             echo "Release changed, update needed"
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
-            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
+            echo "force_all_upserts=false" >> "$GITHUB_OUTPUT"
           else
             echo "No update needed"
             echo "needs_update=false" >> "$GITHUB_OUTPUT"
-            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
+            echo "force_all_upserts=false" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-diff:
@@ -142,7 +128,7 @@ jobs:
       - name: Generate differential update (forward)
         run: |
           FORCE_ALL_FLAG=""
-          if [ "${{ needs.check-release.outputs.force_full_rebuild }}" = "true" ]; then
+          if [ "${{ needs.check-release.outputs.force_all_upserts }}" = "true" ]; then
             FORCE_ALL_FLAG="--force-all"
           fi
 
@@ -160,7 +146,7 @@ jobs:
       - name: Generate differential update (reverse)
         run: |
           FORCE_ALL_FLAG=""
-          if [ "${{ needs.check-release.outputs.force_full_rebuild }}" = "true" ]; then
+          if [ "${{ needs.check-release.outputs.force_all_upserts }}" = "true" ]; then
             FORCE_ALL_FLAG="--force-all"
           fi
 
@@ -242,20 +228,10 @@ jobs:
           path: exports/diff-reverse/
           retention-days: 1
 
-      - name: Upload full indexes (for fallback)
-        uses: actions/upload-artifact@v4
-        with:
-          name: divisions-indexes
-          path: |
-            indexes/divisions-global.db
-            indexes/divisions-reverse.db
-          retention-days: 1
-
     outputs:
       has_changes: ${{ steps.changes.outputs.has_changes }}
       has_forward_changes: ${{ steps.changes.outputs.has_forward_changes }}
       has_reverse_changes: ${{ steps.changes.outputs.has_reverse_changes }}
-      force_full_rebuild: ${{ needs.check-release.outputs.force_full_rebuild }}
 
   apply-updates:
     needs: [check-release, build-and-diff]
@@ -292,21 +268,12 @@ jobs:
           name: diff-sql-reverse
           path: exports/diff-reverse/
 
-      - name: Download full indexes (for initial/full rebuild)
-        uses: actions/download-artifact@v4
-        with:
-          name: divisions-indexes
-          path: indexes/
-
       # ==================== FORWARD GEOCODING ====================
       - name: Apply forward geocoding updates
         uses: ./.github/actions/apply-d1-updates
         with:
           database-name: geocoder-divisions-global
-          index-path: indexes/divisions-global.db
           diff-path: exports/diff
-          table-name: divisions
-          force-full-rebuild: ${{ needs.build-and-diff.outputs.force_full_rebuild }}
           has-changes: ${{ needs.build-and-diff.outputs.has_forward_changes }}
 
       # ==================== REVERSE GEOCODING ====================
@@ -314,10 +281,7 @@ jobs:
         uses: ./.github/actions/apply-d1-updates
         with:
           database-name: geocoder-divisions-reverse
-          index-path: indexes/divisions-reverse.db
           diff-path: exports/diff-reverse
-          table-name: divisions_reverse
-          force-full-rebuild: ${{ needs.build-and-diff.outputs.force_full_rebuild }}
           has-changes: ${{ needs.build-and-diff.outputs.has_reverse_changes }}
 
       # ==================== VERIFY ====================

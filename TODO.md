@@ -87,9 +87,10 @@
 - [x] Add FTS5 triggers for automatic index updates
 - [x] Add differential update script (`scripts/diff_and_update.py`)
 - [x] Add version-based change detection
-- [x] Add `--force-all` flag for schema/logic changes
+- [x] Add `--force-all` flag for logic/FTS changes (zero-downtime)
 - [x] Create composite action for D1 updates (`.github/actions/apply-d1-updates`)
-- [x] Add `force_full_rebuild` workflow trigger for drop+recreate
+- [x] Separate schema rebuild workflow (`schema-rebuild.yml`) for destructive changes
+- [x] Add paginated fetch for production versions (handles D1 row limits)
 
 ## Stretch Goals
 
