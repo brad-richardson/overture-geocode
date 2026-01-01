@@ -123,6 +123,19 @@ jobs:
       - name: Check if changes exist
         id: changes
         run: |
+          # Validate stats.json exists and has expected structure
+          if [ ! -f exports/diff/stats.json ]; then
+            echo "Error: stats.json not found"
+            exit 1
+          fi
+
+          # Validate JSON structure before extracting values
+          if ! jq -e '.inserts != null and .updates != null and .deletes != null and .unchanged != null' exports/diff/stats.json > /dev/null 2>&1; then
+            echo "Error: stats.json missing required fields"
+            cat exports/diff/stats.json
+            exit 1
+          fi
+
           INSERTS=$(jq '.inserts' exports/diff/stats.json)
           UPDATES=$(jq '.updates' exports/diff/stats.json)
           DELETES=$(jq '.deletes' exports/diff/stats.json)
@@ -195,13 +208,15 @@ jobs:
         run: |
           INSERTS=$(jq '.inserts' exports/diff/stats.json)
           UNCHANGED=$(jq '.unchanged' exports/diff/stats.json)
+          TOTAL_NEW=$(jq '.total_new' exports/diff/stats.json)
 
-          # If all records are inserts and none unchanged, this is initial deployment
-          if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -gt 100000 ]; then
-            echo "Initial deployment detected (all records are new)"
+          # Initial deployment: no existing records in production (all are inserts, none unchanged)
+          # This avoids arbitrary thresholds - if prod is empty, it's initial deployment
+          if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -eq "$TOTAL_NEW" ] && [ "$INSERTS" -gt 0 ]; then
+            echo "Initial deployment detected (production is empty, all $INSERTS records are new)"
             echo "initial_deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Incremental update"
+            echo "Incremental update (unchanged: $UNCHANGED, inserts: $INSERTS)"
             echo "initial_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -256,13 +271,18 @@ jobs:
 
   deploy-worker:
     needs: [test, check-release, build-and-diff, apply-updates]
-    # Run if: tests passed AND (no update needed OR updates applied successfully)
+    # Run if: tests passed AND one of:
+    #   - No data update needed (check-release says no)
+    #   - Data update succeeded (apply-updates ran and succeeded)
+    #   - No changes to apply (build-and-diff ran, has_changes=false, apply-updates skipped)
     if: |
       always() &&
       needs.test.result == 'success' &&
-      (needs.check-release.outputs.needs_update == 'false' ||
-       needs.apply-updates.result == 'success' ||
-       needs.apply-updates.result == 'skipped')
+      (
+        needs.check-release.outputs.needs_update == 'false' ||
+        needs.apply-updates.result == 'success' ||
+        (needs.build-and-diff.result == 'success' && needs.apply-updates.result == 'skipped')
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -14,15 +14,25 @@
 set -e
 
 DB_NAME="geocoder-divisions-global"
+FALLBACK_RELEASE="2025-12-17.0"
 
 # Get latest Overture release
 echo "Fetching latest Overture release..."
-LATEST_RELEASE=$(python3 scripts/stac.py 2>/dev/null) || {
-    echo "Warning: Could not fetch latest release, using fallback"
-    LATEST_RELEASE="2025-12-17.0"
-}
-# Extract just the version if there's extra text
-LATEST_RELEASE=$(echo "$LATEST_RELEASE" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+STAC_OUTPUT=$(python3 scripts/stac.py 2>&1) && STAC_SUCCESS=true || STAC_SUCCESS=false
+
+if [ "$STAC_SUCCESS" = "true" ]; then
+    # Extract just the version if there's extra text
+    LATEST_RELEASE=$(echo "$STAC_OUTPUT" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+    if [ -z "$LATEST_RELEASE" ]; then
+        echo "Warning: Could not parse release from STAC output: $STAC_OUTPUT"
+        echo "Using fallback: $FALLBACK_RELEASE"
+        LATEST_RELEASE="$FALLBACK_RELEASE"
+    fi
+else
+    echo "Warning: STAC fetch failed: $STAC_OUTPUT"
+    echo "Using fallback: $FALLBACK_RELEASE"
+    LATEST_RELEASE="$FALLBACK_RELEASE"
+fi
 echo "Latest Overture release: $LATEST_RELEASE"
 
 # Get current production release

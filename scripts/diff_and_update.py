@@ -24,20 +24,44 @@ Output:
 import argparse
 import csv
 import json
+import math
 import sqlite3
 from pathlib import Path
 
 
 def load_prod_versions(csv_path: Path) -> dict[str, int]:
-    """Load production gers_id -> version mapping from CSV."""
+    """Load production gers_id -> version mapping from CSV.
+
+    Handles case-insensitive column names and various edge cases.
+    """
     versions = {}
     with open(csv_path, "r") as f:
         reader = csv.DictReader(f)
+
+        # Normalize fieldnames to lowercase for case-insensitive matching
+        if reader.fieldnames:
+            fieldname_map = {name.lower(): name for name in reader.fieldnames}
+        else:
+            return versions
+
+        gers_id_col = fieldname_map.get("gers_id")
+        version_col = fieldname_map.get("version")
+
+        if not gers_id_col or not version_col:
+            print(f"Warning: CSV missing required columns. Found: {reader.fieldnames}")
+            return versions
+
         for row in reader:
-            gers_id = row.get("gers_id") or row.get("GERS_ID")
-            version = row.get("version") or row.get("VERSION")
-            if gers_id and version:
-                versions[gers_id] = int(version)
+            gers_id = row.get(gers_id_col, "").strip()
+            version_str = row.get(version_col, "").strip()
+
+            if gers_id and version_str:
+                try:
+                    versions[gers_id] = int(version_str)
+                except ValueError:
+                    print(f"Warning: Invalid version '{version_str}' for gers_id '{gers_id}'")
+                    continue
+
     return versions
 
 
@@ -49,12 +73,20 @@ def escape_sql_string(s: str) -> str:
 
 
 def format_value(val) -> str:
-    """Format a Python value for SQL."""
+    """Format a Python value for SQL.
+
+    Handles None, strings, integers, floats (including edge cases like NaN/Infinity).
+    """
     if val is None:
         return "NULL"
     if isinstance(val, str):
         return escape_sql_string(val)
-    if isinstance(val, (int, float)):
+    if isinstance(val, float):
+        # Handle special float values
+        if math.isnan(val) or math.isinf(val):
+            return "NULL"
+        return str(val)
+    if isinstance(val, int):
         return str(val)
     return escape_sql_string(str(val))
 

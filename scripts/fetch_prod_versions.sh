@@ -49,7 +49,9 @@ echo "Querying divisions table..."
 RESULT=$(npx wrangler d1 execute "$DB_NAME" --remote \
     --command "SELECT gers_id, version FROM divisions" \
     --json 2>&1) || {
-    echo "Warning: Query failed, treating as empty database"
+    echo "Warning: Query failed with error:"
+    echo "$RESULT"
+    echo "Treating as empty database"
     echo "gers_id,version" > "$OUTPUT_FILE"
     exit 0
 }
