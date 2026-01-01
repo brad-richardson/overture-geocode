@@ -130,8 +130,7 @@ def generate_diff(
     # Open upserts file
     upserts_file = output_dir / "upserts.sql"
     with open(upserts_file, "w") as f:
-        f.write("-- Upserts: new and changed records\n")
-        f.write("BEGIN TRANSACTION;\n\n")
+        f.write("-- Upserts: new and changed records\n\n")
 
         cursor = db.execute(f"SELECT {cols_str} FROM divisions")
 
@@ -160,26 +159,21 @@ def generate_diff(
                 # Unchanged
                 stats["unchanged"] += 1
 
-            # Commit in chunks for large updates
+            # Progress marker for large updates
             if batch_count > 0 and batch_count % chunk_size == 0:
-                f.write("\nCOMMIT;\nBEGIN TRANSACTION;\n\n")
-
-        f.write("\nCOMMIT;\n")
+                f.write(f"-- Progress: {batch_count} records\n")
 
     db.close()
 
     # Generate deletes for records no longer in source
     deletes_file = output_dir / "deletes.sql"
     with open(deletes_file, "w") as f:
-        f.write("-- Deletes: records removed from Overture\n")
-        f.write("BEGIN TRANSACTION;\n\n")
+        f.write("-- Deletes: records removed from Overture\n\n")
 
         for gers_id in prod_versions.keys():
             if gers_id not in seen_gers_ids:
                 stats["deletes"] += 1
                 f.write(f"DELETE FROM divisions WHERE gers_id = {escape_sql_string(gers_id)};\n")
-
-        f.write("\nCOMMIT;\n")
 
     # Generate metadata update
     metadata_file = output_dir / "metadata.sql"

@@ -221,8 +221,7 @@ def export_to_sql(
 
             chunk_file = output_dir / f"data-{chunk_num:03d}.sql"
             current_file = open(chunk_file, "w")
-            current_file.write(f"-- Chunk {chunk_num}: rows {total_exported + 1} to {min(total_exported + chunk_size, total_count)}\n")
-            current_file.write("BEGIN TRANSACTION;\n\n")
+            current_file.write(f"-- Chunk {chunk_num}: rows {total_exported + 1} to {min(total_exported + chunk_size, total_count)}\n\n")
 
         # Format INSERT OR REPLACE statement
         values = ", ".join(format_value(v) for v in row)
@@ -234,7 +233,6 @@ def export_to_sql(
 
         # Close chunk if full
         if rows_in_chunk >= chunk_size:
-            current_file.write("\nCOMMIT;\n")
             current_file.close()
             print(f"  Wrote {chunk_file.name} ({rows_in_chunk:,} rows)")
             chunk_num += 1
@@ -243,7 +241,6 @@ def export_to_sql(
 
     # Close final chunk
     if current_file:
-        current_file.write("\nCOMMIT;\n")
         current_file.close()
         print(f"  Wrote data-{chunk_num:03d}.sql ({rows_in_chunk:,} rows)")
 
