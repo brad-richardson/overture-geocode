@@ -1,5 +1,6 @@
 -- Download and filter Overture Maps addresses for Massachusetts
--- Run with: duckdb < scripts/download_addresses.sql
+-- Run with: ./scripts/download_addresses.sh [STATE] [RELEASE]
+-- Or manually: sed 's/__OVERTURE_RELEASE__/2025-01-01.0/g' scripts/download_addresses.sql | duckdb
 --
 -- Prerequisites:
 --   brew install duckdb  (or download from duckdb.org)
@@ -57,13 +58,13 @@ COPY (
             COALESCE(postcode, '')
         )) as search_text
     FROM read_parquet(
-        's3://overturemaps-us-west-2/release/2025-12-17.0/theme=addresses/type=address/*',
+        's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=addresses/type=address/*',
         hive_partitioning = true
     )
     WHERE country = 'US'
-      AND address_levels[1].value = 'MA'
+      AND address_levels[1].value = '__STATE__'
 )
-TO 'exports/US-MA.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+TO 'exports/US-__STATE__.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
 
 -- Show count
-SELECT COUNT(*) as address_count FROM read_parquet('exports/US-MA.parquet');
+SELECT COUNT(*) as address_count FROM read_parquet('exports/US-__STATE__.parquet');

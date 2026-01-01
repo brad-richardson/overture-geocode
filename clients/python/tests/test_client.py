@@ -25,7 +25,6 @@ class TestOvertureGeocoderInit:
         """Should use default configuration values."""
         client = OvertureGeocoder()
         assert client.get_base_url() == "https://overture-geocoder.bradr.workers.dev"
-        assert client.get_overture_release() == "2025-12-17.0"
         assert client.timeout == 30.0
         assert client.retries == 0
         client.close()
@@ -37,13 +36,11 @@ class TestOvertureGeocoderInit:
             timeout=10.0,
             retries=3,
             retry_delay=0.5,
-            overture_release="2025-01-01.0",
         )
         assert client.get_base_url() == "https://api.example.com"
         assert client.timeout == 10.0
         assert client.retries == 3
         assert client.retry_delay == 0.5
-        assert client.get_overture_release() == "2025-01-01.0"
         client.close()
 
     def test_strips_trailing_slash(self):

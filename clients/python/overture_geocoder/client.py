@@ -28,7 +28,6 @@ DEFAULT_BASE_URL = "https://overture-geocoder.bradr.workers.dev"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_RETRIES = 0
 DEFAULT_RETRY_DELAY = 1.0
-DEFAULT_OVERTURE_RELEASE = "2025-12-17.0"
 
 T = TypeVar("T")
 
@@ -139,7 +138,6 @@ class OvertureGeocoder:
         retry_delay: Delay between retries in seconds (default: 1.0)
         headers: Custom headers to include in all requests
         http_client: Custom httpx.Client instance
-        overture_release: Overture Maps release version for geometry fetching
 
     Example:
         >>> client = OvertureGeocoder(base_url="https://api.example.com")
@@ -156,14 +154,12 @@ class OvertureGeocoder:
         retry_delay: float = DEFAULT_RETRY_DELAY,
         headers: Optional[dict[str, str]] = None,
         http_client: Optional[httpx.Client] = None,
-        overture_release: str = DEFAULT_OVERTURE_RELEASE,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.retries = retries
         self.retry_delay = retry_delay
         self.headers = headers or {}
-        self.overture_release = overture_release
 
         self._owns_client = http_client is None
         self._http = http_client or httpx.Client(
@@ -330,10 +326,6 @@ class OvertureGeocoder:
     def get_base_url(self) -> str:
         """Get the base URL configured for this client."""
         return self.base_url
-
-    def get_overture_release(self) -> str:
-        """Get the Overture release version configured for this client."""
-        return self.overture_release
 
     def close(self) -> None:
         """Close HTTP client and release resources."""

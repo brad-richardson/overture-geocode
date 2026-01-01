@@ -81,16 +81,13 @@ describe("OvertureGeocoder", () => {
     it("should use default configuration", () => {
       const client = new OvertureGeocoder();
       expect(client.getBaseUrl()).toBe("https://overture-geocoder.bradr.workers.dev");
-      expect(client.getOvertureRelease()).toBe("2025-12-17.0");
     });
 
-    it("should accept custom configuration", () => {
+    it("should accept custom baseUrl", () => {
       const client = new OvertureGeocoder({
         baseUrl: "https://api.example.com/",
-        overtureRelease: "2025-01-01.0",
       });
       expect(client.getBaseUrl()).toBe("https://api.example.com");
-      expect(client.getOvertureRelease()).toBe("2025-01-01.0");
     });
 
     it("should strip trailing slash from baseUrl", () => {

@@ -74,8 +74,6 @@ export interface OvertureGeocoderConfig {
   onRequest?: (url: string, init: RequestInit) => RequestInit | Promise<RequestInit>;
   /** Response interceptor - process response before returning */
   onResponse?: (response: Response) => Response | Promise<Response>;
-  /** Overture Maps release version for geometry fetching */
-  overtureRelease?: string;
 }
 
 export interface GeoJSONFeature {
@@ -136,7 +134,6 @@ const DEFAULT_BASE_URL = "https://overture-geocoder.bradr.workers.dev";
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_RETRIES = 0;
 const DEFAULT_RETRY_DELAY = 1000;
-const DEFAULT_OVERTURE_RELEASE = "2025-12-17.0";
 
 // ============================================================================
 // Client
@@ -151,7 +148,6 @@ export class OvertureGeocoder {
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly onRequest?: OvertureGeocoderConfig["onRequest"];
   private readonly onResponse?: OvertureGeocoderConfig["onResponse"];
-  private readonly overtureRelease: string;
 
   // DuckDB-WASM for geometry fetching (lazy loaded)
   private duckdb: unknown = null;
@@ -167,7 +163,6 @@ export class OvertureGeocoder {
     this.fetchFn = config.fetch ?? globalThis.fetch;
     this.onRequest = config.onRequest;
     this.onResponse = config.onResponse;
-    this.overtureRelease = config.overtureRelease ?? DEFAULT_OVERTURE_RELEASE;
   }
 
   /**
@@ -217,14 +212,6 @@ export class OvertureGeocoder {
     const url = `${this.baseUrl}/search?${params}`;
     const response = await this.fetchWithRetry(url);
     return response.json();
-  }
-
-
-  /**
-   * Get the Overture release version configured for this client.
-   */
-  getOvertureRelease(): string {
-    return this.overtureRelease;
   }
 
   /**

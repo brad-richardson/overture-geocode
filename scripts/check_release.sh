@@ -35,6 +35,20 @@ else
 fi
 echo "Latest Overture release: $LATEST_RELEASE"
 
+# Verify the release data is accessible (sanity check for expired data)
+echo "Verifying release $LATEST_RELEASE data is accessible..."
+VERIFY_RESULT=$(duckdb -c "
+    INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';
+    SELECT COUNT(*) as cnt FROM read_parquet(
+        's3://overturemaps-us-west-2/release/$LATEST_RELEASE/theme=divisions/type=division/*'
+    ) LIMIT 1;
+" 2>&1) || {
+    echo "ERROR: Release $LATEST_RELEASE data not accessible (may be expired after 90 days)"
+    echo "DuckDB output: $VERIFY_RESULT"
+    exit 1
+}
+echo "Release data verified."
+
 # Get current production release
 echo "Checking production release..."
 PROD_RELEASE=$(npx wrangler d1 execute "$DB_NAME" --remote \
