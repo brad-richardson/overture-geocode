@@ -21,9 +21,11 @@ SET memory_limit = '8GB';
 -- Extract global divisions (cities, towns, neighborhoods, counties)
 -- Subtypes: country, dependency, region, county, localadmin, locality,
 --           macrohood, neighborhood, microhood
+-- Note: version field increments each Overture release when feature changes
 COPY (
     SELECT
         id as gers_id,
+        version,
         names.primary as name,
         subtype,
         class,
