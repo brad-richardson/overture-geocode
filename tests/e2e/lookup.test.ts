@@ -25,7 +25,7 @@ describe('/lookup endpoint', () => {
       const results = await response.json();
       expect(results.length).toBe(1);
       expect(results[0].gers_id).toBe(BOSTON_GERS_ID);
-      expect(results[0].display_name).toBe('Boston, MA');
+      expect(results[0].primary_name).toBe('Boston, MA');
       expect(results[0].type).toBe('locality');
     });
 
@@ -35,7 +35,7 @@ describe('/lookup endpoint', () => {
 
       const result = results[0];
       expect(result.gers_id).toBeDefined();
-      expect(result.display_name).toBeDefined();
+      expect(result.primary_name).toBeDefined();
       expect(result.lat).toBeDefined();
       expect(result.lon).toBeDefined();
       expect(result.boundingbox).toBeDefined();
@@ -136,7 +136,7 @@ describe('/lookup endpoint', () => {
 
       const feature = geojson.features[0];
       expect(feature.properties.gers_id).toBe(BOSTON_GERS_ID);
-      expect(feature.properties.display_name).toBe('Boston, MA');
+      expect(feature.properties.primary_name).toBe('Boston, MA');
     });
   });
 

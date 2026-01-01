@@ -43,12 +43,12 @@ COPY (
         address_levels[1].value as state,
         address_levels[2].value as city,
         postal_city,
-        -- Build display name: "123 Main St, Boston, MA 02101"
+        -- Build primary name: "123 Main St, Boston, MA 02101"
         CONCAT_WS(', ',
             NULLIF(CONCAT_WS(' ', number, street, unit), ''),
             COALESCE(address_levels[2].value, postal_city),
             CONCAT(address_levels[1].value, ' ', postcode)
-        ) as display_name,
+        ) as primary_name,
         -- Build search text (lowercase, for FTS indexing)
         LOWER(CONCAT_WS(' ',
             COALESCE(number, ''),

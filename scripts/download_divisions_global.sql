@@ -34,7 +34,7 @@ COPY (
         bbox.ymin as bbox_ymin,
         bbox.xmax as bbox_xmax,
         bbox.ymax as bbox_ymax,
-        -- Build display name based on available data
+        -- Build primary name based on available data
         CASE
             -- US format: "Boston, MA"
             WHEN country = 'US' AND region IS NOT NULL THEN
@@ -45,9 +45,13 @@ COPY (
             -- Fallback: just the name and country
             ELSE
                 CONCAT(names.primary, ', ', country)
-        END as display_name,
-        -- Search text (lowercase name)
-        LOWER(names.primary) as search_text
+        END as primary_name,
+        -- Search text includes all name variants for multilingual search
+        LOWER(CONCAT_WS(' ',
+            names.primary,
+            ARRAY_TO_STRING(MAP_VALUES(names.common), ' '),
+            ARRAY_TO_STRING(names.alternate, ' ')
+        )) as search_text
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/2025-12-17.0/theme=divisions/type=division/*',
         hive_partitioning = true

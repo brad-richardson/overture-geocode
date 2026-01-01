@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Build SQLite FTS5 index from Overture address and division Parquet files.
+Build SQLite FTS5 index from Overture address Parquet files.
 
 Usage:
-    python scripts/build_index.py exports/US-MA.parquet exports/US-MA-divisions.parquet indexes/US-MA.db
+    python scripts/build_index.py exports/US-MA.parquet indexes/US-MA.db
 
 Prerequisites:
     pip install duckdb
 
 Output:
-    SQLite database with FTS5 full-text search index for addresses and divisions
+    SQLite database with FTS5 full-text search index for addresses.
+    For global divisions, use build_divisions_index.py instead.
 """
 
 import sqlite3
@@ -21,11 +22,10 @@ import duckdb
 
 def build_fts_index(
     addresses_path: Path,
-    divisions_path: Path,
     output_db: Path,
     batch_size: int = 10000
 ):
-    """Build SQLite FTS5 index from Parquet files."""
+    """Build SQLite FTS5 index from address Parquet file."""
 
     con = duckdb.connect()
 
@@ -45,7 +45,7 @@ def build_fts_index(
             rowid INTEGER PRIMARY KEY,
             gers_id TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,          -- 'address', 'locality', 'neighborhood', etc.
-            display_name TEXT NOT NULL,
+            primary_name TEXT NOT NULL,
             lat REAL NOT NULL,
             lon REAL NOT NULL,
             bbox_xmin REAL NOT NULL,
@@ -55,7 +55,8 @@ def build_fts_index(
             population INTEGER,          -- For ranking divisions
             city TEXT,
             state TEXT,
-            postcode TEXT
+            postcode TEXT,
+            search_text TEXT NOT NULL
         )
     """)
 
@@ -73,67 +74,23 @@ def build_fts_index(
     db.execute("""
         CREATE TRIGGER features_ai AFTER INSERT ON features BEGIN
             INSERT INTO features_fts(rowid, search_text)
-            VALUES (new.rowid, LOWER(new.display_name));
+            VALUES (new.rowid, new.search_text);
         END
     """)
     db.execute("""
         CREATE TRIGGER features_ad AFTER DELETE ON features BEGIN
             INSERT INTO features_fts(features_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            VALUES ('delete', old.rowid, old.search_text);
         END
     """)
     db.execute("""
         CREATE TRIGGER features_au AFTER UPDATE ON features BEGIN
             INSERT INTO features_fts(features_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            VALUES ('delete', old.rowid, old.search_text);
             INSERT INTO features_fts(rowid, search_text)
-            VALUES (new.rowid, LOWER(new.display_name));
+            VALUES (new.rowid, new.search_text);
         END
     """)
-
-    # Insert divisions first (they should rank higher)
-    if divisions_path.exists():
-        print(f"Reading divisions from {divisions_path}...")
-        div_count = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{divisions_path}')"
-        ).fetchone()[0]
-        print(f"Found {div_count:,} divisions")
-
-        cursor = con.execute(f"""
-            SELECT
-                gers_id,
-                subtype as type,
-                display_name,
-                lat,
-                lon,
-                bbox_xmin,
-                bbox_ymin,
-                bbox_xmax,
-                bbox_ymax,
-                population,
-                NULL as city,
-                'MA' as state,
-                NULL as postcode,
-                search_text
-            FROM read_parquet('{divisions_path}')
-        """)
-
-        batch = []
-        inserted = 0
-
-        for row in cursor.fetchall():
-            batch.append(row)
-
-            if len(batch) >= batch_size:
-                _insert_batch(db, batch)
-                inserted += len(batch)
-                print(f"  Divisions: {inserted:,} / {div_count:,}")
-                batch = []
-
-        if batch:
-            _insert_batch(db, batch)
-            inserted += len(batch)
-            print(f"  Divisions: {inserted:,} / {div_count:,} (done)")
 
     # Insert addresses
     if addresses_path.exists():
@@ -147,7 +104,7 @@ def build_fts_index(
             SELECT
                 gers_id,
                 'address' as type,
-                display_name,
+                primary_name,
                 lat,
                 lon,
                 bbox_xmin,
@@ -202,12 +159,12 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
     db.executemany(
         """
         INSERT INTO features (
-            gers_id, type, display_name, lat, lon,
+            gers_id, type, primary_name, lat, lon,
             bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-            population, city, state, postcode
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            population, city, state, postcode, search_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12]) for r in batch],
+        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13]) for r in batch],
     )
 
 
@@ -226,7 +183,7 @@ def test_search(db_path: Path, query: str, limit: int = 5):
         """
         SELECT
             f.type,
-            f.display_name,
+            f.primary_name,
             f.population,
             f.lat,
             f.lon,
@@ -255,25 +212,20 @@ def test_search(db_path: Path, query: str, limit: int = 5):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print("Usage: python build_index.py <addresses.parquet> <divisions.parquet> <output.db>")
-        print("Example: python build_index.py exports/US-MA.parquet exports/US-MA-divisions.parquet indexes/US-MA.db")
+    if len(sys.argv) < 3:
+        print("Usage: python build_index.py <addresses.parquet> <output.db>")
+        print("Example: python build_index.py exports/US-MA.parquet indexes/US-MA.db")
         sys.exit(1)
 
     addresses_path = Path(sys.argv[1])
-    divisions_path = Path(sys.argv[2])
-    output_db = Path(sys.argv[3])
+    output_db = Path(sys.argv[2])
 
     if not addresses_path.exists():
         print(f"Error: {addresses_path} not found")
         sys.exit(1)
 
-    if not divisions_path.exists():
-        print(f"Warning: {divisions_path} not found, building without divisions")
-
-    build_fts_index(addresses_path, divisions_path, output_db)
+    build_fts_index(addresses_path, output_db)
 
     # Run test searches
-    test_search(output_db, "boston")
-    test_search(output_db, "cambridge")
+    test_search(output_db, "123 main")
     test_search(output_db, "main street boston")

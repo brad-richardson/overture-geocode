@@ -27,7 +27,7 @@ CREATE TABLE divisions (
     rowid INTEGER PRIMARY KEY,
     gers_id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
-    display_name TEXT NOT NULL,
+    primary_name TEXT NOT NULL,
     lat REAL NOT NULL,
     lon REAL NOT NULL,
     bbox_xmin REAL NOT NULL,
@@ -36,7 +36,8 @@ CREATE TABLE divisions (
     bbox_ymax REAL NOT NULL,
     population INTEGER,
     country TEXT,
-    region TEXT
+    region TEXT,
+    search_text TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE divisions_fts USING fts5(
@@ -49,19 +50,19 @@ CREATE VIRTUAL TABLE divisions_fts USING fts5(
 -- Triggers for FTS sync (auto-update on INSERT OR REPLACE)
 CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN
     INSERT INTO divisions_fts(rowid, search_text)
-    VALUES (new.rowid, LOWER(new.display_name));
+    VALUES (new.rowid, new.search_text);
 END;
 
 CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN
     INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, LOWER(old.display_name));
+    VALUES ('delete', old.rowid, old.search_text);
 END;
 
 CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN
     INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, LOWER(old.display_name));
+    VALUES ('delete', old.rowid, old.search_text);
     INSERT INTO divisions_fts(rowid, search_text)
-    VALUES (new.rowid, LOWER(new.display_name));
+    VALUES (new.rowid, new.search_text);
 END;
 
 -- Indexes (UNIQUE on gers_id already creates an index)
@@ -80,7 +81,7 @@ CREATE TABLE features (
     rowid INTEGER PRIMARY KEY,
     gers_id TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL,
-    display_name TEXT NOT NULL,
+    primary_name TEXT NOT NULL,
     lat REAL NOT NULL,
     lon REAL NOT NULL,
     bbox_xmin REAL NOT NULL,
@@ -90,7 +91,8 @@ CREATE TABLE features (
     population INTEGER,
     city TEXT,
     state TEXT,
-    postcode TEXT
+    postcode TEXT,
+    search_text TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE features_fts USING fts5(
@@ -103,19 +105,19 @@ CREATE VIRTUAL TABLE features_fts USING fts5(
 -- Triggers for FTS sync (auto-update on INSERT OR REPLACE)
 CREATE TRIGGER features_ai AFTER INSERT ON features BEGIN
     INSERT INTO features_fts(rowid, search_text)
-    VALUES (new.rowid, LOWER(new.display_name));
+    VALUES (new.rowid, new.search_text);
 END;
 
 CREATE TRIGGER features_ad AFTER DELETE ON features BEGIN
     INSERT INTO features_fts(features_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, LOWER(old.display_name));
+    VALUES ('delete', old.rowid, old.search_text);
 END;
 
 CREATE TRIGGER features_au AFTER UPDATE ON features BEGIN
     INSERT INTO features_fts(features_fts, rowid, search_text)
-    VALUES ('delete', old.rowid, LOWER(old.display_name));
+    VALUES ('delete', old.rowid, old.search_text);
     INSERT INTO features_fts(rowid, search_text)
-    VALUES (new.rowid, LOWER(new.display_name));
+    VALUES (new.rowid, new.search_text);
 END;
 
 -- Indexes (UNIQUE on gers_id already creates an index)
@@ -162,16 +164,16 @@ def export_to_sql(
     if table == "divisions":
         schema = get_divisions_schema()
         columns = [
-            "gers_id", "type", "display_name", "lat", "lon",
+            "gers_id", "type", "primary_name", "lat", "lon",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "population", "country", "region"
+            "population", "country", "region", "search_text"
         ]
     else:
         schema = get_features_schema()
         columns = [
-            "gers_id", "type", "display_name", "lat", "lon",
+            "gers_id", "type", "primary_name", "lat", "lon",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "population", "city", "state", "postcode"
+            "population", "city", "state", "postcode", "search_text"
         ]
 
     with open(schema_file, "w") as f:

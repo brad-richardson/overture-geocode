@@ -45,7 +45,7 @@ def create_test_fixture():
             rowid INTEGER PRIMARY KEY,
             gers_id TEXT NOT NULL,
             type TEXT NOT NULL,
-            display_name TEXT NOT NULL,
+            primary_name TEXT NOT NULL,
             lat REAL NOT NULL,
             lon REAL NOT NULL,
             bbox_xmin REAL NOT NULL,
@@ -55,7 +55,8 @@ def create_test_fixture():
             population INTEGER,
             city TEXT,
             state TEXT,
-            postcode TEXT
+            postcode TEXT,
+            search_text TEXT NOT NULL
         )
     """)
 
@@ -80,10 +81,10 @@ def create_test_fixture():
     for query in division_queries:
         rows = src.execute("""
             SELECT
-                f.gers_id, f.type, f.display_name, f.lat, f.lon,
+                f.gers_id, f.type, f.primary_name, f.lat, f.lon,
                 f.bbox_xmin, f.bbox_ymin, f.bbox_xmax, f.bbox_ymax,
                 f.population, f.city, f.state, f.postcode,
-                LOWER(f.display_name) as search_text
+                f.search_text
             FROM features f
             JOIN features_fts ON features_fts.rowid = f.rowid
             WHERE features_fts MATCH ?
@@ -105,10 +106,10 @@ def create_test_fixture():
     # Extract some addresses with "123 main" for address search tests
     addresses = src.execute("""
         SELECT
-            f.gers_id, f.type, f.display_name, f.lat, f.lon,
+            f.gers_id, f.type, f.primary_name, f.lat, f.lon,
             f.bbox_xmin, f.bbox_ymin, f.bbox_xmax, f.bbox_ymax,
             f.population, f.city, f.state, f.postcode,
-            LOWER(f.display_name) as search_text
+            f.search_text
         FROM features f
         JOIN features_fts ON features_fts.rowid = f.rowid
         WHERE features_fts MATCH '"123" "main"'
@@ -125,11 +126,11 @@ def create_test_fixture():
     for row in all_records:
         dst.execute("""
             INSERT INTO features (
-                gers_id, type, display_name, lat, lon,
+                gers_id, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                population, city, state, postcode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, row[:13])
+                population, city, state, postcode, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, row[:14])
 
         # Insert FTS entry
         last_id = dst.execute("SELECT last_insert_rowid()").fetchone()[0]

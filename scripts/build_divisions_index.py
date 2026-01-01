@@ -48,7 +48,7 @@ def build_divisions_index(
             rowid INTEGER PRIMARY KEY,
             gers_id TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,
-            display_name TEXT NOT NULL,
+            primary_name TEXT NOT NULL,
             lat REAL NOT NULL,
             lon REAL NOT NULL,
             bbox_xmin REAL NOT NULL,
@@ -57,7 +57,8 @@ def build_divisions_index(
             bbox_ymax REAL NOT NULL,
             population INTEGER,
             country TEXT,
-            region TEXT
+            region TEXT,
+            search_text TEXT NOT NULL
         )
     """)
 
@@ -75,21 +76,21 @@ def build_divisions_index(
     db.execute("""
         CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN
             INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, LOWER(new.display_name));
+            VALUES (new.rowid, new.search_text);
         END
     """)
     db.execute("""
         CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN
             INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            VALUES ('delete', old.rowid, old.search_text);
         END
     """)
     db.execute("""
         CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN
             INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, LOWER(old.display_name));
+            VALUES ('delete', old.rowid, old.search_text);
             INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, LOWER(new.display_name));
+            VALUES (new.rowid, new.search_text);
         END
     """)
 
@@ -104,7 +105,7 @@ def build_divisions_index(
         SELECT
             gers_id,
             subtype as type,
-            display_name,
+            primary_name,
             lat,
             lon,
             bbox_xmin,
@@ -160,12 +161,12 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
     db.executemany(
         """
         INSERT INTO divisions (
-            gers_id, type, display_name, lat, lon,
+            gers_id, type, primary_name, lat, lon,
             bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-            population, country, region
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            population, country, region, search_text
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]) for r in batch],
+        [(r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12]) for r in batch],
     )
 
 
@@ -181,7 +182,7 @@ def test_search(db_path: Path, query: str, limit: int = 5):
         """
         SELECT
             d.type,
-            d.display_name,
+            d.primary_name,
             d.population,
             d.country,
             d.lat,

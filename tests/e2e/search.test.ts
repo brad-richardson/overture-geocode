@@ -21,7 +21,7 @@ describe('/search endpoint', () => {
       expect(results.length).toBeGreaterThan(0);
 
       // First result should be Boston city (locality with population)
-      expect(results[0].display_name).toBe('Boston, MA');
+      expect(results[0].primary_name).toBe('Boston, MA');
       expect(results[0].type).toBe('locality');
     });
 
@@ -33,7 +33,7 @@ describe('/search endpoint', () => {
       expect(results.length).toBeGreaterThan(0);
 
       // First result should be Cambridge city
-      expect(results[0].display_name).toBe('Cambridge, MA');
+      expect(results[0].primary_name).toBe('Cambridge, MA');
       expect(results[0].type).toBe('locality');
     });
 
@@ -46,12 +46,12 @@ describe('/search endpoint', () => {
 
       // First should be county (pop ~862K), second should be city (pop ~206K)
       expect(results[0].type).toBe('county');
-      expect(results[0].display_name).toContain('Worcester');
+      expect(results[0].primary_name).toContain('Worcester');
 
       // Find the locality in results
       const city = results.find((r: { type: string }) => r.type === 'locality');
       expect(city).toBeDefined();
-      expect(city.display_name).toContain('Worcester');
+      expect(city.primary_name).toContain('Worcester');
     });
   });
 
@@ -91,16 +91,16 @@ describe('/search endpoint', () => {
       expect(addresses.length).toBeGreaterThan(0);
     });
 
-    it('should have proper display_name format for addresses', async () => {
+    it('should have proper primary_name format for addresses', async () => {
       const response = await fetch(`${baseUrl}/search?q=123+main&limit=5`);
       const results = await response.json();
 
       const addresses = results.filter((r: { type: string }) => r.type === 'address');
       expect(addresses.length).toBeGreaterThan(0);
 
-      // Address display_name should contain street, city, state, postcode
+      // Address primary_name should contain street, city, state, postcode
       for (const addr of addresses) {
-        expect(addr.display_name).toMatch(/\d+.*,.*,.*MA.*\d{5}/);
+        expect(addr.primary_name).toMatch(/\d+.*,.*,.*MA.*\d{5}/);
       }
     });
   });
@@ -115,7 +115,7 @@ describe('/search endpoint', () => {
 
       // Required fields
       expect(result.gers_id).toBeDefined();
-      expect(result.display_name).toBeDefined();
+      expect(result.primary_name).toBeDefined();
       expect(result.lat).toBeDefined();
       expect(result.lon).toBeDefined();
       expect(result.boundingbox).toBeDefined();

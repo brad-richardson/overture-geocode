@@ -16,7 +16,7 @@ export interface Env {
 
 interface GeocoderResult {
   gers_id: string;
-  display_name: string;
+  primary_name: string;
   lat: string;
   lon: string;
   boundingbox: string[];
@@ -39,7 +39,7 @@ interface FeatureRow {
   rowid: number;
   gers_id: string;
   type: string;
-  display_name: string;
+  primary_name: string;
   lat: number;
   lon: number;
   bbox_xmin: number;
@@ -57,7 +57,7 @@ interface DivisionRow {
   rowid: number;
   gers_id: string;
   type: string;
-  display_name: string;
+  primary_name: string;
   lat: number;
   lon: number;
   bbox_xmin: number;
@@ -124,7 +124,7 @@ async function searchDivisions(
         d.rowid,
         d.gers_id,
         d.type,
-        d.display_name,
+        d.primary_name,
         d.lat,
         d.lon,
         d.bbox_xmin,
@@ -150,7 +150,7 @@ async function searchDivisions(
 
     return (result.results || []).map((row) => ({
       gers_id: row.gers_id,
-      display_name: row.display_name,
+      primary_name: row.primary_name,
       lat: row.lat.toFixed(7),
       lon: row.lon.toFixed(7),
       boundingbox: [
@@ -192,7 +192,7 @@ async function searchAddresses(
           f.rowid,
           f.gers_id,
           f.type,
-          f.display_name,
+          f.primary_name,
           f.lat,
           f.lon,
           f.bbox_xmin,
@@ -232,7 +232,7 @@ async function searchAddresses(
       for (const row of result.results) {
         const geocoderResult: GeocoderResult = {
           gers_id: row.gers_id,
-          display_name: row.display_name,
+          primary_name: row.primary_name,
           lat: row.lat.toFixed(7),
           lon: row.lon.toFixed(7),
           boundingbox: [
@@ -248,7 +248,7 @@ async function searchAddresses(
         };
 
         if (addressdetails && row.type === "address") {
-          const parts = row.display_name.split(", ");
+          const parts = row.primary_name.split(", ");
           geocoderResult.address = {
             road: parts[0]?.replace(/^\d+\s+/, "") || undefined,
             house_number: parts[0]?.match(/^(\d+)/)?.[1] || undefined,
@@ -316,7 +316,7 @@ async function handleSearch(
         id: r.gers_id,
         properties: {
           gers_id: r.gers_id,
-          display_name: r.display_name,
+          primary_name: r.primary_name,
           importance: r.importance,
           ...r.address,
         },
@@ -366,7 +366,7 @@ async function handleLookup(
             rowid,
             gers_id,
             type,
-            display_name,
+            primary_name,
             lat,
             lon,
             bbox_xmin,
@@ -386,7 +386,7 @@ async function handleLookup(
       for (const row of divResult.results || []) {
         results.push({
           gers_id: row.gers_id,
-          display_name: row.display_name,
+          primary_name: row.primary_name,
           lat: row.lat.toFixed(7),
           lon: row.lon.toFixed(7),
           boundingbox: [
@@ -415,7 +415,7 @@ async function handleLookup(
             rowid,
             gers_id,
             type,
-            display_name,
+            primary_name,
             lat,
             lon,
             bbox_xmin,
@@ -436,7 +436,7 @@ async function handleLookup(
       for (const row of addrResult.results || []) {
         results.push({
           gers_id: row.gers_id,
-          display_name: row.display_name,
+          primary_name: row.primary_name,
           lat: row.lat.toFixed(7),
           lon: row.lon.toFixed(7),
           boundingbox: [
@@ -469,7 +469,7 @@ async function handleLookup(
         id: r.gers_id,
         properties: {
           gers_id: r.gers_id,
-          display_name: r.display_name,
+          primary_name: r.primary_name,
           ...r.address,
         },
         geometry: {
