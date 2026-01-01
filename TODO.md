@@ -28,23 +28,23 @@
 - [x] Include population in ranking
 
 ### E2E Tests
-- [ ] Add E2E tests for search ranking (boston → city first, cambridge → city first)
-- [ ] Add E2E tests for division types (locality, neighborhood, county)
-- [ ] Add E2E tests for address search (123 main → addresses returned)
-- [ ] Add E2E tests for /lookup endpoint with GERS IDs
+- [x] Add E2E tests for search ranking (boston → city first, cambridge → city first)
+- [x] Add E2E tests for division types (locality, neighborhood, county)
+- [x] Add E2E tests for address search (123 main → addresses returned)
+- [x] Add E2E tests for /lookup endpoint with GERS IDs
 
 ### Python Client
 - [x] Create package structure (`clients/python/`)
 - [x] Implement `OvertureGeocoder.search()`
-- [x] Add DuckDB-based `get_geometry()` for GERS lookups
-- [ ] Write basic tests
+- [x] Add `get_geometry()` for GERS lookups (uses overturemaps-py)
+- [x] Write basic tests (28 tests)
 - [ ] Publish to PyPI (optional)
 
 ### JavaScript Client
 - [x] Create package structure (`clients/js/`)
 - [x] Implement browser + Node.js client
-- [ ] Add DuckDB-WASM support for client-side geometry
-- [ ] Write basic tests
+- [x] Add DuckDB-WASM support for client-side geometry (STAC + getFullGeometry)
+- [x] Write basic tests (45 tests)
 - [ ] Publish to npm (optional)
 
 ## Phase 2: Full US Coverage
@@ -72,7 +72,7 @@
 
 - [x] Add STAC client (`stac.overturemaps.org`) for dynamic release discovery
 - [ ] Auto-detect latest Overture release in scripts
-- [ ] Set up GitHub Actions for CI/CD
+- [x] Set up GitHub Actions for CI/CD
 
 ## Stretch Goals
 
