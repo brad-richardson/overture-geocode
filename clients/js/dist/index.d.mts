@@ -1,60 +1,4 @@
-interface StacCatalog {
-    id: string;
-    type: string;
-    title?: string;
-    description?: string;
-    links: StacLink[];
-    registry?: GersRegistry;
-}
-interface StacLink {
-    rel: string;
-    href: string;
-    type?: string;
-    title?: string;
-    latest?: boolean;
-}
-interface GersRegistry {
-    path: string;
-    manifest: [string, string][];
-}
-interface RegistryEntry {
-    id: string;
-    filepath: string | null;
-    bbox: {
-        xmin: number;
-        ymin: number;
-        xmax: number;
-        ymax: number;
-    } | null;
-    version: string;
-    first_seen: string;
-    last_seen: string;
-    last_changed: string;
-}
-/**
- * Fetch the STAC catalog from Overture Maps.
- * Results are cached for the session.
- */
-declare function getStacCatalog(fetchFn?: typeof fetch): Promise<StacCatalog>;
-/**
- * Clear the cached STAC catalog.
- */
-declare function clearCatalogCache(): void;
-/**
- * Get the latest Overture release version from the STAC catalog.
- */
-declare function getLatestRelease(fetchFn?: typeof fetch): Promise<string>;
-/**
- * Binary search to find the registry file containing a GERS ID.
- *
- * The manifest is sorted by max_id, so we find the first file
- * where max_id >= the target ID.
- *
- * @param manifest Array of [filename, max_id] tuples sorted by max_id
- * @param gersId The GERS ID to look up
- * @returns The registry filename or null if not found
- */
-declare function findRegistryFile(manifest: [string, string][], gersId: string): string | null;
+export { StacCatalog, StacLink, clearCache as clearCatalogCache, getLatestRelease, getStacCatalog } from '@bradrichardson/overturemaps';
 
 /**
  * Overture Geocoder JavaScript/TypeScript Client
@@ -184,9 +128,6 @@ declare class OvertureGeocoder {
     private readonly fetchFn;
     private readonly onRequest?;
     private readonly onResponse?;
-    private duckdb;
-    private duckdbConn;
-    private duckdbInitPromise;
     constructor(config?: OvertureGeocoderConfig);
     /**
      * Search for addresses matching the query.
@@ -220,15 +161,9 @@ declare class OvertureGeocoder {
      */
     getBaseUrl(): string;
     /**
-     * Fetch full geometry for a GERS ID directly from Overture S3 via DuckDB-WASM.
+     * Fetch full geometry for a GERS ID directly from Overture S3.
      *
-     * Uses the STAC catalog's GERS registry for efficient lookup:
-     * 1. Binary search manifest to find registry file
-     * 2. Query registry for filepath + bbox (predicate pushdown)
-     * 3. Query actual geometry from the specific parquet file
-     *
-     * Note: Requires @duckdb/duckdb-wasm package (~15MB, lazy loaded on first call):
-     *   npm install @duckdb/duckdb-wasm
+     * Uses the @bradrichardson/overturemaps package for efficient lookup.
      *
      * @param gersId The GERS ID to look up
      * @returns GeoJSON Feature with full geometry, or null if not found
@@ -239,13 +174,6 @@ declare class OvertureGeocoder {
      * Call this when done with geometry fetching to free memory.
      */
     close(): Promise<void>;
-    /**
-     * Initialize DuckDB-WASM with httpfs extension.
-     * Lazy loaded on first geometry fetch call.
-     */
-    private initDuckDB;
-    private doInitDuckDB;
-    private queryDuckDB;
     private fetchWithRetry;
     private doFetch;
     private parseResults;
@@ -262,4 +190,4 @@ declare function geocode(query: string, options?: SearchOptions): Promise<Geocod
  */
 declare function reverseGeocode(lat: number, lon: number, options?: ReverseOptions): Promise<ReverseGeocoderResult[]>;
 
-export { type AddressDetails, type GeoJSONFeature, type GeoJSONFeatureCollection, type GeoJSONGeometry, GeocoderError, GeocoderNetworkError, type GeocoderResult, GeocoderTimeoutError, type GersRegistry, type HierarchyEntry, OvertureGeocoder, type OvertureGeocoderConfig, type RegistryEntry, type ReverseGeocoderResult, type ReverseOptions, type SearchOptions, type StacCatalog, type StacLink, clearCatalogCache, OvertureGeocoder as default, findRegistryFile, geocode, getLatestRelease, getStacCatalog, reverseGeocode };
+export { type AddressDetails, type GeoJSONFeature, type GeoJSONFeatureCollection, type GeoJSONGeometry, GeocoderError, GeocoderNetworkError, type GeocoderResult, GeocoderTimeoutError, type HierarchyEntry, OvertureGeocoder, type OvertureGeocoderConfig, type ReverseGeocoderResult, type ReverseOptions, type SearchOptions, OvertureGeocoder as default, geocode, reverseGeocode };

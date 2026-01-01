@@ -1,56 +1,10 @@
-import "./chunk-OOIUSZB4.mjs";
-
-// src/stac.ts
-var STAC_CATALOG_URL = "https://stac.overturemaps.org/catalog.json";
-var S3_BASE_URL = "s3://overturemaps-us-west-2";
-var catalogCache = null;
-async function getStacCatalog(fetchFn = fetch) {
-  if (catalogCache) return catalogCache;
-  const response = await fetchFn(STAC_CATALOG_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch STAC catalog: ${response.status}`);
-  }
-  catalogCache = await response.json();
-  return catalogCache;
-}
-function clearCatalogCache() {
-  catalogCache = null;
-}
-async function getLatestRelease(fetchFn = fetch) {
-  const catalog = await getStacCatalog(fetchFn);
-  for (const link of catalog.links) {
-    if (link.latest === true) {
-      const match = link.href.match(/\.\/([0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+)\//);
-      if (match) {
-        return match[1];
-      }
-    }
-  }
-  throw new Error("Could not find latest release in STAC catalog");
-}
-function findRegistryFile(manifest, gersId) {
-  if (manifest.length === 0) return null;
-  const id = gersId.toLowerCase();
-  let left = 0;
-  let right = manifest.length - 1;
-  while (left < right) {
-    const mid = Math.floor((left + right) / 2);
-    if (manifest[mid][1] < id) {
-      left = mid + 1;
-    } else {
-      right = mid;
-    }
-  }
-  return manifest[left]?.[1] >= id ? manifest[left][0] : null;
-}
-function getRegistryS3Path(registry, filename) {
-  return `${S3_BASE_URL}/${registry.path}/${filename}`;
-}
-function getDataS3Path(filepath) {
-  return `${S3_BASE_URL}/${filepath}`;
-}
-
 // src/index.ts
+import { getFeatureByGersId, closeDb } from "@bradrichardson/overturemaps";
+import {
+  getStacCatalog,
+  getLatestRelease,
+  clearCache
+} from "@bradrichardson/overturemaps";
 var GeocoderError = class extends Error {
   constructor(message, status, response) {
     super(message);
@@ -85,10 +39,6 @@ var OvertureGeocoder = class {
   fetchFn;
   onRequest;
   onResponse;
-  // DuckDB-WASM for geometry fetching (lazy loaded)
-  duckdb = null;
-  duckdbConn = null;
-  duckdbInitPromise = null;
   constructor(config = {}) {
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeout = config.timeout ?? DEFAULT_TIMEOUT;
@@ -198,65 +148,22 @@ var OvertureGeocoder = class {
     return this.baseUrl;
   }
   /**
-   * Fetch full geometry for a GERS ID directly from Overture S3 via DuckDB-WASM.
+   * Fetch full geometry for a GERS ID directly from Overture S3.
    *
-   * Uses the STAC catalog's GERS registry for efficient lookup:
-   * 1. Binary search manifest to find registry file
-   * 2. Query registry for filepath + bbox (predicate pushdown)
-   * 3. Query actual geometry from the specific parquet file
-   *
-   * Note: Requires @duckdb/duckdb-wasm package (~15MB, lazy loaded on first call):
-   *   npm install @duckdb/duckdb-wasm
+   * Uses the @bradrichardson/overturemaps package for efficient lookup.
    *
    * @param gersId The GERS ID to look up
    * @returns GeoJSON Feature with full geometry, or null if not found
    */
   async getFullGeometry(gersId) {
-    const catalog = await getStacCatalog(this.fetchFn);
-    if (!catalog.registry) {
-      throw new GeocoderError("GERS registry not found in STAC catalog");
-    }
-    const registryFile = findRegistryFile(catalog.registry.manifest, gersId);
-    if (!registryFile) {
-      return null;
-    }
-    const conn = await this.initDuckDB();
-    const registryPath = getRegistryS3Path(catalog.registry, registryFile);
-    const registryResult = await this.queryDuckDB(conn, `
-      SELECT filepath, bbox
-      FROM read_parquet('${registryPath}')
-      WHERE id = '${gersId}'
-      LIMIT 1
-    `);
-    if (registryResult.length === 0) {
-      return null;
-    }
-    const registryRow = registryResult[0];
-    const filepath = registryRow.filepath;
-    const bbox = registryRow.bbox;
-    if (!filepath) {
-      return null;
-    }
-    const dataPath = getDataS3Path(filepath);
-    const geometryResult = await this.queryDuckDB(conn, `
-      SELECT id, ST_AsGeoJSON(geometry) as geojson, names
-      FROM read_parquet('${dataPath}')
-      WHERE id = '${gersId}'
-      LIMIT 1
-    `);
-    if (geometryResult.length === 0) {
-      return null;
-    }
-    const row = geometryResult[0];
-    const geometry = JSON.parse(row.geojson);
+    const feature = await getFeatureByGersId(gersId);
+    if (!feature) return null;
     return {
       type: "Feature",
-      id: gersId,
-      properties: {
-        names: row.names
-      },
-      bbox: bbox ? [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax] : void 0,
-      geometry
+      id: feature.id,
+      properties: feature.properties,
+      bbox: feature.bbox,
+      geometry: feature.geometry
     };
   }
   /**
@@ -264,68 +171,11 @@ var OvertureGeocoder = class {
    * Call this when done with geometry fetching to free memory.
    */
   async close() {
-    if (this.duckdbConn) {
-      const conn = this.duckdbConn;
-      await conn.close();
-      this.duckdbConn = null;
-    }
-    if (this.duckdb) {
-      const db = this.duckdb;
-      await db.terminate();
-      this.duckdb = null;
-    }
-    this.duckdbInitPromise = null;
+    await closeDb();
   }
   // ==========================================================================
   // Private methods
   // ==========================================================================
-  /**
-   * Initialize DuckDB-WASM with httpfs extension.
-   * Lazy loaded on first geometry fetch call.
-   */
-  async initDuckDB() {
-    if (this.duckdbConn) {
-      return this.duckdbConn;
-    }
-    if (this.duckdbInitPromise) {
-      return this.duckdbInitPromise;
-    }
-    this.duckdbInitPromise = this.doInitDuckDB();
-    return this.duckdbInitPromise;
-  }
-  async doInitDuckDB() {
-    try {
-      const duckdb = await import("./duckdb-node-KLXLGZSD.mjs");
-      const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
-      const worker = new Worker(bundle.mainWorker);
-      const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
-      const db = new duckdb.AsyncDuckDB(logger, worker);
-      await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-      this.duckdb = db;
-      const conn = await db.connect();
-      this.duckdbConn = conn;
-      await conn.query("INSTALL httpfs;");
-      await conn.query("LOAD httpfs;");
-      await conn.query("SET s3_region = 'us-west-2';");
-      await conn.query("INSTALL spatial;");
-      await conn.query("LOAD spatial;");
-      return conn;
-    } catch (error) {
-      this.duckdbInitPromise = null;
-      if (error instanceof Error && error.message.includes("Cannot find module")) {
-        throw new GeocoderError(
-          "@duckdb/duckdb-wasm required for geometry fetching. Install with: npm install @duckdb/duckdb-wasm"
-        );
-      }
-      throw error;
-    }
-  }
-  async queryDuckDB(conn, sql) {
-    const connection = conn;
-    const result = await connection.query(sql);
-    const table = result;
-    return table.toArray();
-  }
   async fetchWithRetry(url, attempt = 0) {
     try {
       const response = await this.doFetch(url);
@@ -459,9 +309,8 @@ export {
   GeocoderNetworkError,
   GeocoderTimeoutError,
   OvertureGeocoder,
-  clearCatalogCache,
+  clearCache as clearCatalogCache,
   index_default as default,
-  findRegistryFile,
   geocode,
   getLatestRelease,
   getStacCatalog,
