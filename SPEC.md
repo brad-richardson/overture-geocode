@@ -246,6 +246,32 @@ database_name = "geocoder-us-ma"
 database_id = "xxx"
 ```
 
+### Why Cloudflare?
+
+**Decision factors:**
+1. **Simplicity** - Native D1/Workers integration, zero configuration
+2. **Edge performance** - Queries served from nearest data center globally
+3. **Scaling model** - Per-state databases fit D1's 10GB limit naturally
+4. **Cost at scale** - ~$50-60/mo for full US + global (well under $100 threshold)
+
+**Alternatives considered:**
+
+| Option | Pros | Why Not |
+|--------|------|---------|
+| Turso | Same SQLite/FTS5, better free tier (9GB) | Migration work for marginal savings |
+| Self-hosted VPS | Cheapest (~$7/mo Hetzner) | Single region, operational burden |
+| Supabase | Managed PostgreSQL | 8GB limit, would need FTS5 rewrite |
+
+**Cost projections:**
+
+| Scale | D1 Storage | Reads | Total |
+|-------|------------|-------|-------|
+| 5 states (demo) | ~5GB | Free tier | ~$0-4/mo |
+| 50 states (full US) | ~45GB | Free tier | ~$34/mo |
+| US + global places | ~65GB | + buffer | ~$50-60/mo |
+
+D1's free tier includes 5M reads/day - sufficient for demo/moderate production use.
+
 ## Future: Reverse Geocoding
 
 Add H3 spatial index for point-to-address queries:
