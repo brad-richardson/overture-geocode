@@ -154,8 +154,7 @@ CREATE TABLE divisions_reverse (
     bbox_ymin REAL NOT NULL,
     bbox_xmax REAL NOT NULL,
     bbox_ymax REAL NOT NULL,
-    area REAL,
-    h3_cells TEXT
+    area REAL
 );
 
 -- Metadata table
@@ -174,7 +173,6 @@ CREATE INDEX idx_bbox_ymax ON divisions_reverse(bbox_ymax);
 CREATE INDEX idx_subtype ON divisions_reverse(subtype);
 CREATE INDEX idx_country ON divisions_reverse(country);
 CREATE INDEX idx_area ON divisions_reverse(area);
-CREATE INDEX idx_h3_cells ON divisions_reverse(h3_cells);
 """
 
 
@@ -227,7 +225,7 @@ def export_to_sql(
             "gers_id", "version", "subtype", "primary_name", "lat", "lon",
             "population", "country", "region",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "area", "h3_cells"
+            "area"
         ]
     else:
         schema = get_features_schema()

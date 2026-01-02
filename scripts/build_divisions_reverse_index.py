@@ -72,8 +72,7 @@ def build_divisions_reverse_index(
             bbox_ymin REAL NOT NULL,
             bbox_xmax REAL NOT NULL,
             bbox_ymax REAL NOT NULL,
-            area REAL,
-            h3_cells TEXT
+            area REAL
         )
     """)
 
@@ -99,8 +98,7 @@ def build_divisions_reverse_index(
             bbox_ymin,
             bbox_xmax,
             bbox_ymax,
-            area,
-            h3_cells
+            area
         FROM read_parquet('{parquet_path}')
     """)
 
@@ -138,7 +136,6 @@ def build_divisions_reverse_index(
     db.execute("CREATE INDEX idx_subtype ON divisions_reverse(subtype)")
     db.execute("CREATE INDEX idx_country ON divisions_reverse(country)")
     db.execute("CREATE INDEX idx_area ON divisions_reverse(area)")
-    db.execute("CREATE INDEX idx_h3_cells ON divisions_reverse(h3_cells)")
 
     # Store metadata
     db.execute("INSERT INTO metadata VALUES ('type', 'divisions-reverse')")
@@ -161,8 +158,8 @@ def _insert_batch(db: sqlite3.Connection, batch: list):
             gers_id, version, subtype, primary_name, lat, lon,
             population, country, region,
             bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-            area, h3_cells
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            area
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         batch,
     )
@@ -184,8 +181,7 @@ def test_reverse_query(db_path: Path, lat: float, lon: float, limit: int = 10):
             primary_name,
             area,
             population,
-            country,
-            h3_cells
+            country
         FROM divisions_reverse
         WHERE bbox_xmin <= ?
           AND bbox_xmax >= ?
@@ -203,8 +199,7 @@ def test_reverse_query(db_path: Path, lat: float, lon: float, limit: int = 10):
         for r in results:
             pop = f", pop={r[3]:,}" if r[3] else ""
             area = f", area={r[2]:.4f}" if r[2] else ""
-            h3 = f", h3_cells={len(r[5].split(',')) if r[5] else 0}" if r[5] else ""
-            print(f"  [{r[0]:12}] {r[1]} ({r[4]}){pop}{area}{h3}")
+            print(f"  [{r[0]:12}] {r[1]} ({r[4]}){pop}{area}")
 
     db.close()
     return results

@@ -47,7 +47,7 @@ TABLE_SCHEMAS = {
             "gers_id", "version", "subtype", "primary_name", "lat", "lon",
             "population", "country", "region",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "area", "h3_cells"
+            "area"
         ],
     },
 }

@@ -12,8 +12,9 @@ INSTALL httpfs;
 LOAD httpfs;
 INSTALL spatial;
 LOAD spatial;
-INSTALL h3;
-LOAD h3;
+-- H3 disabled for now - bbox is sufficient for reverse geocoding
+-- INSTALL h3;
+-- LOAD h3;
 
 -- Configure S3 for anonymous access (Overture is public)
 SET s3_region = 'us-west-2';
@@ -66,13 +67,7 @@ COPY (
             ST_XMax(geometry) as bbox_xmax,
             ST_YMax(geometry) as bbox_ymax,
             -- Area for ranking (smaller = more specific)
-            ST_Area(geometry) as area,
-            -- H3 cells covering polygon at resolution 4 (~22km edge length)
-            -- Resolution 4 is appropriate for cities/counties
-            ARRAY_TO_STRING(
-                h3_polygon_wkt_to_cells(ST_AsText(geometry), 4),
-                ','
-            ) as h3_cells
+            ST_Area(geometry) as area
         FROM read_parquet(
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division_area/*',
             hive_partitioning = true
@@ -92,8 +87,7 @@ COPY (
         a.bbox_ymin,
         a.bbox_xmax,
         a.bbox_ymax,
-        a.area,
-        a.h3_cells
+        a.area
     FROM divisions d
     JOIN areas a ON d.gers_id = a.division_id
 )
@@ -108,6 +102,6 @@ GROUP BY subtype
 ORDER BY count DESC;
 
 -- Show sample records
-SELECT gers_id, subtype, primary_name, lat, lon, h3_cells
+SELECT gers_id, subtype, primary_name, lat, lon, area
 FROM read_parquet('exports/divisions-reverse.parquet')
 LIMIT 5;

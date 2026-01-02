@@ -112,7 +112,6 @@ interface DivisionReverseRow {
   population: number | null;
   country: string | null;
   region: string | null;
-  h3_cells: string | null;
 }
 
 /**
@@ -402,7 +401,7 @@ async function handleReverse(
         gers_id, subtype, primary_name,
         lat, lon,
         bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-        area, population, country, region, h3_cells
+        area, population, country, region
       FROM divisions_reverse
       WHERE bbox_xmin <= ?
         AND bbox_xmax >= ?
