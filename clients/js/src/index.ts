@@ -4,7 +4,15 @@
  * Forward geocoder using Overture Maps data with Nominatim-compatible API.
  */
 
-import { getFeatureByGersId, closeDb } from "@bradrichardson/overturemaps";
+import {
+  getFeatureByGersId,
+  closeDb,
+} from "@bradrichardson/overturemaps";
+import {
+  queryOverture,
+  closeDuckDB,
+  isDuckDBAvailable,
+} from "./duckdb-query.js";
 
 // Re-export STAC utilities from overturemaps for advanced usage
 export {
@@ -13,6 +21,9 @@ export {
   clearCache as clearCatalogCache,
 } from "@bradrichardson/overturemaps";
 export type { StacCatalog, StacLink } from "@bradrichardson/overturemaps";
+
+// Re-export DuckDB query utilities for advanced usage
+export { queryOverture, closeDuckDB, isDuckDBAvailable } from "./duckdb-query.js";
 
 // ============================================================================
 // Types
@@ -38,6 +49,19 @@ export interface SearchOptions {
 export interface ReverseOptions {
   /** Response format */
   format?: "jsonv2" | "geojson";
+  /**
+   * Verify point-in-polygon using full geometry from S3.
+   * When enabled, fetches full polygon for each bbox-matched result
+   * and filters to only results where the point is truly inside.
+   * @default false
+   */
+  verifyGeometry?: boolean;
+  /**
+   * Maximum number of results to verify geometry for.
+   * Higher values increase accuracy but take longer.
+   * @default 10
+   */
+  verifyLimit?: number;
 }
 
 export interface HierarchyEntry {
@@ -97,6 +121,110 @@ export type GeoJSONGeometry =
 export interface GeoJSONFeatureCollection {
   type: "FeatureCollection";
   features: GeoJSONFeature[];
+}
+
+// ============================================================================
+// Overture S3 Query Types (Places, Addresses)
+// ============================================================================
+
+export interface OverturePlace {
+  id: string;
+  names: {
+    primary: string;
+    common?: Record<string, string>;
+  };
+  categories?: {
+    primary?: string;
+    alternate?: string[];
+  };
+  addresses?: Array<{
+    freeform?: string;
+    locality?: string;
+    region?: string;
+    country?: string;
+    postcode?: string;
+  }>;
+  phones?: string[];
+  websites?: string[];
+  brand?: {
+    names?: {
+      primary?: string;
+    };
+  };
+  lat: number;
+  lon: number;
+  distance_km: number;
+  confidence: number;
+}
+
+export interface OvertureAddress {
+  id: string;
+  number?: string;
+  street?: string;
+  unit?: string;
+  postcode?: string;
+  freeform?: string;
+  lat: number;
+  lon: number;
+  distance_km: number;
+}
+
+export interface NearbySearchOptions {
+  /**
+   * Search radius in kilometers
+   * @default 1
+   */
+  radiusKm?: number;
+  /**
+   * Maximum number of results
+   * @default 10
+   */
+  limit?: number;
+  /**
+   * Category filter for places (e.g., 'restaurant', 'cafe')
+   */
+  category?: string;
+}
+
+export interface RefinedReverseResult {
+  /** Division hierarchy for the location */
+  divisions: ReverseGeocoderResult[];
+  /** Nearby places from Overture */
+  places?: OverturePlace[];
+  /** Nearby addresses from Overture */
+  addresses?: OvertureAddress[];
+}
+
+export interface ReverseAndRefineOptions {
+  /**
+   * Verify division geometry using point-in-polygon
+   * @default true
+   */
+  verifyGeometry?: boolean;
+  /**
+   * Include nearby places in results
+   * @default true
+   */
+  includePlaces?: boolean;
+  /**
+   * Include nearby addresses in results
+   * @default true
+   */
+  includeAddresses?: boolean;
+  /**
+   * Search radius for nearby places/addresses in km
+   * @default 0.5
+   */
+  radiusKm?: number;
+  /**
+   * Maximum nearby results per type
+   * @default 5
+   */
+  nearbyLimit?: number;
+  /**
+   * Category filter for places
+   */
+  placeCategory?: string;
 }
 
 // ============================================================================
@@ -208,6 +336,12 @@ export class OvertureGeocoder {
    * Returns divisions (localities, neighborhoods, counties, etc.) that
    * contain the given coordinate. Results are sorted by specificity
    * (smallest/most specific first).
+   *
+   * @param lat Latitude
+   * @param lon Longitude
+   * @param options Reverse geocoding options
+   * @param options.verifyGeometry If true, fetches full polygons from S3 and filters
+   *                               to only results where point is inside the polygon
    */
   async reverse(
     lat: number,
@@ -228,7 +362,55 @@ export class OvertureGeocoder {
       return data as unknown as ReverseGeocoderResult[];
     }
 
-    return this.parseReverseResults(data);
+    let results = this.parseReverseResults(data);
+
+    // Optional: verify geometry using point-in-polygon
+    if (options.verifyGeometry) {
+      const verifyLimit = options.verifyLimit ?? 10;
+      const toVerify = results.slice(0, verifyLimit);
+      const verified = await this.verifyResultsGeometry(toVerify, lat, lon);
+      // Keep verified results + any remaining unverified (beyond limit)
+      results = [...verified, ...results.slice(verifyLimit)];
+    }
+
+    return results;
+  }
+
+  /**
+   * Verify which reverse geocode results actually contain the point.
+   * Fetches full geometry from S3 and performs point-in-polygon checks.
+   * Updates confidence to "exact" for verified results.
+   */
+  private async verifyResultsGeometry(
+    results: ReverseGeocoderResult[],
+    lat: number,
+    lon: number
+  ): Promise<ReverseGeocoderResult[]> {
+    const verified: ReverseGeocoderResult[] = [];
+
+    // Fetch geometries in parallel
+    const geometryPromises = results.map(async (result) => {
+      try {
+        const contains = await this.verifyContainsPoint(result.gers_id, lat, lon);
+        return { result, contains };
+      } catch {
+        // If geometry fetch fails, assume bbox is correct
+        return { result, contains: true };
+      }
+    });
+
+    const checks = await Promise.all(geometryPromises);
+
+    for (const { result, contains } of checks) {
+      if (contains) {
+        verified.push({
+          ...result,
+          confidence: "exact", // Upgraded from bbox
+        });
+      }
+    }
+
+    return verified;
   }
 
   /**
@@ -305,11 +487,233 @@ export class OvertureGeocoder {
   }
 
   /**
-   * Close DuckDB connection and release resources.
-   * Call this when done with geometry fetching to free memory.
+   * Close all DuckDB connections and release resources.
+   * Call this when done with geometry/place/address fetching to free memory.
    */
   async close(): Promise<void> {
-    await closeDb();
+    await Promise.all([closeDb(), closeDuckDB()]);
+  }
+
+  // ==========================================================================
+  // Overture S3 Direct Query Methods (Places, Addresses)
+  // ==========================================================================
+
+  /**
+   * Get nearby places from Overture S3 using DuckDB spatial query.
+   *
+   * Queries the Overture places theme directly from S3 within a radius
+   * of the given coordinates. Results include business names, categories,
+   * addresses, and contact info.
+   *
+   * @param lat Latitude of center point
+   * @param lon Longitude of center point
+   * @param options Search options (radius, limit, category filter)
+   * @returns Array of nearby places sorted by distance
+   */
+  async getNearbyPlaces(
+    lat: number,
+    lon: number,
+    options: NearbySearchOptions = {}
+  ): Promise<OverturePlace[]> {
+    const radiusKm = options.radiusKm ?? 1;
+    const limit = options.limit ?? 10;
+    const category = options.category;
+
+    // Convert km to approximate degrees for bounding box filter
+    // 1 degree latitude ≈ 111 km, longitude varies by latitude
+    const latDelta = radiusKm / 111;
+    const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+
+    const bboxFilter = `
+      bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta} AND
+      bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
+    `;
+
+    const categoryFilter = category
+      ? `AND categories.primary = '${category.replace(/'/g, "''")}'`
+      : "";
+
+    const query = `
+      SELECT
+        id,
+        names,
+        categories,
+        addresses,
+        phones,
+        websites,
+        brand,
+        ST_X(geometry) as lon,
+        ST_Y(geometry) as lat,
+        -- Haversine distance calculation
+        6371 * 2 * ASIN(SQRT(
+          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
+          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
+          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
+        )) as distance_km,
+        confidence
+      FROM read_parquet(
+        's3://overturemaps-us-west-2/release/__LATEST__/theme=places/type=place/*',
+        hive_partitioning = true
+      )
+      WHERE ${bboxFilter}
+      ${categoryFilter}
+      ORDER BY distance_km ASC
+      LIMIT ${limit * 2}
+    `;
+
+    try {
+      const rows = await queryOverture(query);
+
+      // Post-filter to exact radius and limit
+      return rows
+        .filter((row: Record<string, unknown>) => (row.distance_km as number) <= radiusKm)
+        .slice(0, limit)
+        .map((row: Record<string, unknown>) => ({
+          id: row.id as string,
+          names: row.names as OverturePlace["names"],
+          categories: row.categories as OverturePlace["categories"],
+          addresses: row.addresses as OverturePlace["addresses"],
+          phones: row.phones as string[],
+          websites: row.websites as string[],
+          brand: row.brand as OverturePlace["brand"],
+          lat: row.lat as number,
+          lon: row.lon as number,
+          distance_km: row.distance_km as number,
+          confidence: row.confidence as number,
+        }));
+    } catch (error) {
+      throw new GeocoderError(
+        `Failed to query nearby places: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Get nearby addresses from Overture S3 using DuckDB spatial query.
+   *
+   * Queries the Overture addresses theme directly from S3 within a radius
+   * of the given coordinates. Returns structured address components.
+   *
+   * @param lat Latitude of center point
+   * @param lon Longitude of center point
+   * @param options Search options (radius, limit)
+   * @returns Array of nearby addresses sorted by distance
+   */
+  async getNearbyAddresses(
+    lat: number,
+    lon: number,
+    options: Omit<NearbySearchOptions, "category"> = {}
+  ): Promise<OvertureAddress[]> {
+    const radiusKm = options.radiusKm ?? 0.5;
+    const limit = options.limit ?? 10;
+
+    // Convert km to approximate degrees for bounding box filter
+    const latDelta = radiusKm / 111;
+    const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+
+    const query = `
+      SELECT
+        id,
+        number,
+        street,
+        unit,
+        postcode,
+        freeform,
+        ST_X(geometry) as lon,
+        ST_Y(geometry) as lat,
+        -- Haversine distance calculation
+        6371 * 2 * ASIN(SQRT(
+          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
+          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
+          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
+        )) as distance_km
+      FROM read_parquet(
+        's3://overturemaps-us-west-2/release/__LATEST__/theme=addresses/type=address/*',
+        hive_partitioning = true
+      )
+      WHERE bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta}
+        AND bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
+      ORDER BY distance_km ASC
+      LIMIT ${limit * 2}
+    `;
+
+    try {
+      const rows = await queryOverture(query);
+
+      // Post-filter to exact radius and limit
+      return rows
+        .filter((row: Record<string, unknown>) => (row.distance_km as number) <= radiusKm)
+        .slice(0, limit)
+        .map((row: Record<string, unknown>) => ({
+          id: row.id as string,
+          number: row.number as string | undefined,
+          street: row.street as string | undefined,
+          unit: row.unit as string | undefined,
+          postcode: row.postcode as string | undefined,
+          freeform: row.freeform as string | undefined,
+          lat: row.lat as number,
+          lon: row.lon as number,
+          distance_km: row.distance_km as number,
+        }));
+    } catch (error) {
+      throw new GeocoderError(
+        `Failed to query nearby addresses: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Combined reverse geocode with optional geometry verification and
+   * nearby places/addresses lookup.
+   *
+   * This is a convenience method that combines:
+   * 1. Reverse geocoding (division hierarchy)
+   * 2. Optional point-in-polygon verification
+   * 3. Nearby places from Overture S3
+   * 4. Nearby addresses from Overture S3
+   *
+   * @param lat Latitude
+   * @param lon Longitude
+   * @param options Configuration for what to include
+   * @returns Combined result with divisions, places, and addresses
+   */
+  async reverseAndRefine(
+    lat: number,
+    lon: number,
+    options: ReverseAndRefineOptions = {}
+  ): Promise<RefinedReverseResult> {
+    const {
+      verifyGeometry = true,
+      includePlaces = true,
+      includeAddresses = true,
+      radiusKm = 0.5,
+      nearbyLimit = 5,
+      placeCategory,
+    } = options;
+
+    // Run all queries in parallel
+    const [divisions, places, addresses] = await Promise.all([
+      this.reverse(lat, lon, { verifyGeometry }),
+      includePlaces
+        ? this.getNearbyPlaces(lat, lon, {
+            radiusKm,
+            limit: nearbyLimit,
+            category: placeCategory,
+          })
+        : Promise.resolve(undefined),
+      includeAddresses
+        ? this.getNearbyAddresses(lat, lon, {
+            radiusKm,
+            limit: nearbyLimit,
+          })
+        : Promise.resolve(undefined),
+    ]);
+
+    return {
+      divisions,
+      places: places ?? undefined,
+      addresses: addresses ?? undefined,
+    };
   }
 
   // ==========================================================================

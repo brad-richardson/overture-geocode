@@ -16,7 +16,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts src/duckdb-query.ts --format cjs,esm --dts",
     "test": "vitest",
     "test:ci": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -25,14 +25,25 @@
     "geocoding",
     "overture",
     "maps",
-    "nominatim"
+    "nominatim",
+    "places",
+    "addresses"
   ],
   "author": "Brad Richardson",
   "license": "MIT",
   "dependencies": {
     "@bradrichardson/overturemaps": "^0.2.1"
   },
+  "peerDependencies": {
+    "@duckdb/duckdb-wasm": "^1.28.0"
+  },
+  "peerDependenciesMeta": {
+    "@duckdb/duckdb-wasm": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@duckdb/duckdb-wasm": "^1.28.0",
     "@types/node": "^20.10.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.3",
