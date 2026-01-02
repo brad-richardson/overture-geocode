@@ -10,7 +10,6 @@ import pytest
 from overture_geocoder import (
     OvertureGeocoder,
     GeocoderResult,
-    AddressDetails,
     GeocoderError,
     GeocoderTimeoutError,
     GeocoderNetworkError,
@@ -82,35 +81,23 @@ class TestSearch:
         assert results[0].lat == 42.3601
         assert results[0].lon == -71.0589
 
-    def test_search_with_all_options(self, mock_search_results_with_address):
-        """Should search with all options."""
+    def test_search_with_limit_option(self, mock_search_results):
+        """Should search with limit option."""
         mock_response = MagicMock()
         mock_response.is_success = True
-        mock_response.json.return_value = mock_search_results_with_address
+        mock_response.json.return_value = mock_search_results
 
         mock_client = MagicMock()
         mock_client.get.return_value = mock_response
 
         client = OvertureGeocoder(http_client=mock_client)
-        results = client.search(
-            "123 Main St",
-            limit=5,
-            countrycodes="us,ca",
-            viewbox=(-72, 41, -70, 43),
-            bounded=True,
-            addressdetails=True,
-        )
+        results = client.search("Boston", limit=5)
 
         call_args = mock_client.get.call_args
         params = call_args[1]["params"]
         assert params["limit"] == 5
-        assert params["countrycodes"] == "us,ca"
-        assert params["viewbox"] == "-72,41,-70,43"
-        assert params["bounded"] == "1"
-        assert params["addressdetails"] == "1"
 
-        assert results[0].address is not None
-        assert results[0].address.city == "Boston"
+        assert results[0].type == "locality"
 
     def test_search_clamps_limit(self):
         """Should clamp limit to 1-40 range."""
@@ -376,35 +363,6 @@ class TestGeocoderResult:
 
         with pytest.raises(ValueError, match="No geocoder instance"):
             result.get_geometry()
-
-
-class TestAddressDetails:
-    """Tests for AddressDetails dataclass."""
-
-    def test_address_fields(self):
-        """Should have correct fields."""
-        address = AddressDetails(
-            house_number="123",
-            road="Main St",
-            city="Boston",
-            state="MA",
-            postcode="02101",
-            country="United States",
-            country_code="us",
-        )
-
-        assert address.house_number == "123"
-        assert address.road == "Main St"
-        assert address.city == "Boston"
-        assert address.state == "MA"
-        assert address.postcode == "02101"
-
-    def test_optional_fields(self):
-        """Should allow optional fields."""
-        address = AddressDetails(city="Boston")
-        assert address.city == "Boston"
-        assert address.house_number is None
-        assert address.road is None
 
 
 class TestConvenienceFunctions:
