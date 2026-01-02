@@ -1,6 +1,6 @@
 {
   "name": "@bradrichardson/overture-geocoder",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Forward geocoder using Overture Maps data with Nominatim-compatible API",
   "type": "module",
   "main": "dist/index.js",
@@ -35,12 +35,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bradrichardson/overture-geocoder.git",
+    "url": "git+https://github.com/brad-richardson/overture-geocoder.git",
     "directory": "clients/js"
   },
-  "homepage": "https://github.com/bradrichardson/overture-geocoder#readme",
+  "homepage": "https://github.com/brad-richardson/overture-geocoder#readme",
   "bugs": {
-    "url": "https://github.com/bradrichardson/overture-geocoder/issues"
+    "url": "https://github.com/brad-richardson/overture-geocoder/issues"
   },
   "engines": {
     "node": ">=18.0.0"
