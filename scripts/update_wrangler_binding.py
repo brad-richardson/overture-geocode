@@ -10,12 +10,21 @@ Usage:
 import argparse
 import sys
 
+# Handle tomllib availability (Python 3.11+ has it built-in)
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib
+    try:
+        import tomli as tomllib
+    except ImportError:
+        print("Error: Missing TOML library. Install with: pip install tomli", file=sys.stderr)
+        sys.exit(1)
 
-import tomli_w
+try:
+    import tomli_w
+except ImportError:
+    print("Error: Missing tomli-w library. Install with: pip install tomli-w", file=sys.stderr)
+    sys.exit(1)
 
 
 def update_binding(wrangler_path: str, binding_name: str, new_db_name: str, new_db_id: str) -> bool:
@@ -31,13 +40,26 @@ def update_binding(wrangler_path: str, binding_name: str, new_db_name: str, new_
         True if successful, False otherwise
     """
     # Read the TOML file
-    with open(wrangler_path, "rb") as f:
-        config = tomllib.load(f)
+    try:
+        with open(wrangler_path, "rb") as f:
+            config = tomllib.load(f)
+    except FileNotFoundError:
+        print(f"Error: File not found: {wrangler_path}", file=sys.stderr)
+        return False
+    except PermissionError:
+        print(f"Error: Permission denied reading: {wrangler_path}", file=sys.stderr)
+        return False
+    except tomllib.TOMLDecodeError as e:
+        print(f"Error: Invalid TOML in {wrangler_path}: {e}", file=sys.stderr)
+        return False
 
     # Find and update the d1_databases entry
     d1_databases = config.get("d1_databases", [])
-    found = False
+    if not d1_databases:
+        print(f"Error: No d1_databases section found in {wrangler_path}", file=sys.stderr)
+        return False
 
+    found = False
     for db in d1_databases:
         if db.get("binding") == binding_name:
             old_name = db.get("database_name", "unknown")
@@ -51,12 +73,20 @@ def update_binding(wrangler_path: str, binding_name: str, new_db_name: str, new_
             break
 
     if not found:
-        print(f"Error: Binding '{binding_name}' not found in {wrangler_path}")
+        print(f"Error: Binding '{binding_name}' not found in {wrangler_path}", file=sys.stderr)
+        print(f"Available bindings: {[db.get('binding') for db in d1_databases]}", file=sys.stderr)
         return False
 
     # Write back the TOML file
-    with open(wrangler_path, "wb") as f:
-        tomli_w.dump(config, f)
+    try:
+        with open(wrangler_path, "wb") as f:
+            tomli_w.dump(config, f)
+    except PermissionError:
+        print(f"Error: Permission denied writing: {wrangler_path}", file=sys.stderr)
+        return False
+    except OSError as e:
+        print(f"Error: Failed to write {wrangler_path}: {e}", file=sys.stderr)
+        return False
 
     return True
 
