@@ -16,7 +16,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/duckdb-query.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
     "test": "vitest",
     "test:ci": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -32,7 +32,7 @@
   "author": "Brad Richardson",
   "license": "MIT",
   "dependencies": {
-    "@bradrichardson/overturemaps": "^0.2.1"
+    "@bradrichardson/overturemaps": "^0.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -1,19 +1,15 @@
-import {
-  closeDuckDB,
-  isDuckDBAvailable,
-  queryOverture
-} from "./chunk-KYG7E6JB.mjs";
-import "./chunk-OOIUSZB4.mjs";
-
 // src/index.ts
 import {
   getFeatureByGersId,
-  closeDb
+  closeDb,
+  readByBboxAll
 } from "@bradrichardson/overturemaps";
 import {
   getStacCatalog,
   getLatestRelease,
-  clearCache
+  clearCache,
+  readByBbox,
+  readByBboxAll as readByBboxAll2
 } from "@bradrichardson/overturemaps";
 var GeocoderError = class extends Error {
   constructor(message, status, response) {
@@ -209,17 +205,17 @@ var OvertureGeocoder = class {
     };
   }
   /**
-   * Close all DuckDB connections and release resources.
+   * Close DuckDB connection and release resources.
    * Call this when done with geometry/place/address fetching to free memory.
    */
   async close() {
-    await Promise.all([closeDb(), closeDuckDB()]);
+    await closeDb();
   }
   // ==========================================================================
   // Overture S3 Direct Query Methods (Places, Addresses)
   // ==========================================================================
   /**
-   * Get nearby places from Overture S3 using DuckDB spatial query.
+   * Get nearby places from Overture S3.
    *
    * Queries the Overture places theme directly from S3 within a radius
    * of the given coordinates. Results include business names, categories,
@@ -234,55 +230,28 @@ var OvertureGeocoder = class {
     const radiusKm = options.radiusKm ?? 1;
     const limit = options.limit ?? 10;
     const category = options.category;
-    const latDelta = radiusKm / 111;
-    const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
-    const bboxFilter = `
-      bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta} AND
-      bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
-    `;
-    const categoryFilter = category ? `AND categories.primary = '${category.replace(/'/g, "''")}'` : "";
-    const query = `
-      SELECT
-        id,
-        names,
-        categories,
-        addresses,
-        phones,
-        websites,
-        brand,
-        ST_X(geometry) as lon,
-        ST_Y(geometry) as lat,
-        -- Haversine distance calculation
-        6371 * 2 * ASIN(SQRT(
-          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
-          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
-          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
-        )) as distance_km,
-        confidence
-      FROM read_parquet(
-        's3://overturemaps-us-west-2/release/__LATEST__/theme=places/type=place/*',
-        hive_partitioning = true
-      )
-      WHERE ${bboxFilter}
-      ${categoryFilter}
-      ORDER BY distance_km ASC
-      LIMIT ${limit * 2}
-    `;
+    const bbox = this.radiusToBbox(lat, lon, radiusKm);
     try {
-      const rows = await queryOverture(query);
-      return rows.filter((row) => row.distance_km <= radiusKm).slice(0, limit).map((row) => ({
-        id: row.id,
-        names: row.names,
-        categories: row.categories,
-        addresses: row.addresses,
-        phones: row.phones,
-        websites: row.websites,
-        brand: row.brand,
-        lat: row.lat,
-        lon: row.lon,
-        distance_km: row.distance_km,
-        confidence: row.confidence
-      }));
+      const features = await readByBboxAll("place", bbox, { limit: limit * 3 });
+      return features.map((f) => {
+        const props = f.properties;
+        const coords = f.geometry.coordinates;
+        const fLon = coords[0];
+        const fLat = coords[1];
+        return {
+          id: f.id,
+          names: props.names,
+          categories: props.categories,
+          addresses: props.addresses,
+          phones: props.phones,
+          websites: props.websites,
+          brand: props.brand,
+          lat: fLat,
+          lon: fLon,
+          distance_km: this.haversineDistance(lat, lon, fLat, fLon),
+          confidence: props.confidence ?? 0
+        };
+      }).filter((p) => p.distance_km <= radiusKm).filter((p) => !category || p.categories?.primary === category).sort((a, b) => a.distance_km - b.distance_km).slice(0, limit);
     } catch (error) {
       throw new GeocoderError(
         `Failed to query nearby places: ${error instanceof Error ? error.message : String(error)}`
@@ -290,7 +259,7 @@ var OvertureGeocoder = class {
     }
   }
   /**
-   * Get nearby addresses from Overture S3 using DuckDB spatial query.
+   * Get nearby addresses from Overture S3.
    *
    * Queries the Overture addresses theme directly from S3 within a radius
    * of the given coordinates. Returns structured address components.
@@ -303,46 +272,26 @@ var OvertureGeocoder = class {
   async getNearbyAddresses(lat, lon, options = {}) {
     const radiusKm = options.radiusKm ?? 0.5;
     const limit = options.limit ?? 10;
-    const latDelta = radiusKm / 111;
-    const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
-    const query = `
-      SELECT
-        id,
-        number,
-        street,
-        unit,
-        postcode,
-        freeform,
-        ST_X(geometry) as lon,
-        ST_Y(geometry) as lat,
-        -- Haversine distance calculation
-        6371 * 2 * ASIN(SQRT(
-          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
-          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
-          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
-        )) as distance_km
-      FROM read_parquet(
-        's3://overturemaps-us-west-2/release/__LATEST__/theme=addresses/type=address/*',
-        hive_partitioning = true
-      )
-      WHERE bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta}
-        AND bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
-      ORDER BY distance_km ASC
-      LIMIT ${limit * 2}
-    `;
+    const bbox = this.radiusToBbox(lat, lon, radiusKm);
     try {
-      const rows = await queryOverture(query);
-      return rows.filter((row) => row.distance_km <= radiusKm).slice(0, limit).map((row) => ({
-        id: row.id,
-        number: row.number,
-        street: row.street,
-        unit: row.unit,
-        postcode: row.postcode,
-        freeform: row.freeform,
-        lat: row.lat,
-        lon: row.lon,
-        distance_km: row.distance_km
-      }));
+      const features = await readByBboxAll("address", bbox, { limit: limit * 3 });
+      return features.map((f) => {
+        const props = f.properties;
+        const coords = f.geometry.coordinates;
+        const fLon = coords[0];
+        const fLat = coords[1];
+        return {
+          id: f.id,
+          number: props.number,
+          street: props.street,
+          unit: props.unit,
+          postcode: props.postcode,
+          freeform: props.freeform,
+          lat: fLat,
+          lon: fLon,
+          distance_km: this.haversineDistance(lat, lon, fLat, fLon)
+        };
+      }).filter((a) => a.distance_km <= radiusKm).sort((a, b) => a.distance_km - b.distance_km).slice(0, limit);
     } catch (error) {
       throw new GeocoderError(
         `Failed to query nearby addresses: ${error instanceof Error ? error.message : String(error)}`
@@ -511,6 +460,30 @@ var OvertureGeocoder = class {
   delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+  /**
+   * Convert a radius in km to a bounding box centered on lat/lon
+   */
+  radiusToBbox(lat, lon, radiusKm) {
+    const latDelta = radiusKm / 111;
+    const lonDelta = radiusKm / (111 * Math.cos(lat * Math.PI / 180));
+    return {
+      xmin: lon - lonDelta,
+      ymin: lat - latDelta,
+      xmax: lon + lonDelta,
+      ymax: lat + latDelta
+    };
+  }
+  /**
+   * Calculate Haversine distance between two points in km
+   */
+  haversineDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
 };
 async function geocode(query, options) {
   const client = new OvertureGeocoder();
@@ -527,12 +500,11 @@ export {
   GeocoderTimeoutError,
   OvertureGeocoder,
   clearCache as clearCatalogCache,
-  closeDuckDB,
   index_default as default,
   geocode,
   getLatestRelease,
   getStacCatalog,
-  isDuckDBAvailable,
-  queryOverture,
+  readByBbox,
+  readByBboxAll2 as readByBboxAll,
   reverseGeocode
 };

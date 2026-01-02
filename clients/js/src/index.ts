@@ -7,23 +7,19 @@
 import {
   getFeatureByGersId,
   closeDb,
+  readByBboxAll,
 } from "@bradrichardson/overturemaps";
-import {
-  queryOverture,
-  closeDuckDB,
-  isDuckDBAvailable,
-} from "./duckdb-query.js";
+import type { Feature, BoundingBox } from "@bradrichardson/overturemaps";
 
 // Re-export STAC utilities from overturemaps for advanced usage
 export {
   getStacCatalog,
   getLatestRelease,
   clearCache as clearCatalogCache,
+  readByBbox,
+  readByBboxAll,
 } from "@bradrichardson/overturemaps";
-export type { StacCatalog, StacLink } from "@bradrichardson/overturemaps";
-
-// Re-export DuckDB query utilities for advanced usage
-export { queryOverture, closeDuckDB, isDuckDBAvailable } from "./duckdb-query.js";
+export type { StacCatalog, StacLink, BoundingBox, OvertureType, Feature } from "@bradrichardson/overturemaps";
 
 // ============================================================================
 // Types
@@ -487,11 +483,11 @@ export class OvertureGeocoder {
   }
 
   /**
-   * Close all DuckDB connections and release resources.
+   * Close DuckDB connection and release resources.
    * Call this when done with geometry/place/address fetching to free memory.
    */
   async close(): Promise<void> {
-    await Promise.all([closeDb(), closeDuckDB()]);
+    await closeDb();
   }
 
   // ==========================================================================
@@ -499,7 +495,7 @@ export class OvertureGeocoder {
   // ==========================================================================
 
   /**
-   * Get nearby places from Overture S3 using DuckDB spatial query.
+   * Get nearby places from Overture S3.
    *
    * Queries the Overture places theme directly from S3 within a radius
    * of the given coordinates. Results include business names, categories,
@@ -519,68 +515,38 @@ export class OvertureGeocoder {
     const limit = options.limit ?? 10;
     const category = options.category;
 
-    // Convert km to approximate degrees for bounding box filter
-    // 1 degree latitude ≈ 111 km, longitude varies by latitude
-    const latDelta = radiusKm / 111;
-    const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
-
-    const bboxFilter = `
-      bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta} AND
-      bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
-    `;
-
-    const categoryFilter = category
-      ? `AND categories.primary = '${category.replace(/'/g, "''")}'`
-      : "";
-
-    const query = `
-      SELECT
-        id,
-        names,
-        categories,
-        addresses,
-        phones,
-        websites,
-        brand,
-        ST_X(geometry) as lon,
-        ST_Y(geometry) as lat,
-        -- Haversine distance calculation
-        6371 * 2 * ASIN(SQRT(
-          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
-          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
-          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
-        )) as distance_km,
-        confidence
-      FROM read_parquet(
-        's3://overturemaps-us-west-2/release/__LATEST__/theme=places/type=place/*',
-        hive_partitioning = true
-      )
-      WHERE ${bboxFilter}
-      ${categoryFilter}
-      ORDER BY distance_km ASC
-      LIMIT ${limit * 2}
-    `;
+    // Convert km to approximate degrees for bounding box
+    const bbox = this.radiusToBbox(lat, lon, radiusKm);
 
     try {
-      const rows = await queryOverture(query);
+      // Fetch more than needed since we'll filter by exact distance
+      const features = await readByBboxAll("place", bbox, { limit: limit * 3 });
 
-      // Post-filter to exact radius and limit
-      return rows
-        .filter((row: Record<string, unknown>) => (row.distance_km as number) <= radiusKm)
-        .slice(0, limit)
-        .map((row: Record<string, unknown>) => ({
-          id: row.id as string,
-          names: row.names as OverturePlace["names"],
-          categories: row.categories as OverturePlace["categories"],
-          addresses: row.addresses as OverturePlace["addresses"],
-          phones: row.phones as string[],
-          websites: row.websites as string[],
-          brand: row.brand as OverturePlace["brand"],
-          lat: row.lat as number,
-          lon: row.lon as number,
-          distance_km: row.distance_km as number,
-          confidence: row.confidence as number,
-        }));
+      // Calculate distances and filter
+      return features
+        .map((f) => {
+          const props = f.properties as Record<string, unknown>;
+          const coords = (f.geometry as { coordinates: [number, number] }).coordinates;
+          const fLon = coords[0];
+          const fLat = coords[1];
+          return {
+            id: f.id as string,
+            names: props.names as OverturePlace["names"],
+            categories: props.categories as OverturePlace["categories"],
+            addresses: props.addresses as OverturePlace["addresses"],
+            phones: props.phones as string[],
+            websites: props.websites as string[],
+            brand: props.brand as OverturePlace["brand"],
+            lat: fLat,
+            lon: fLon,
+            distance_km: this.haversineDistance(lat, lon, fLat, fLon),
+            confidence: (props.confidence as number) ?? 0,
+          };
+        })
+        .filter((p) => p.distance_km <= radiusKm)
+        .filter((p) => !category || p.categories?.primary === category)
+        .sort((a, b) => a.distance_km - b.distance_km)
+        .slice(0, limit);
     } catch (error) {
       throw new GeocoderError(
         `Failed to query nearby places: ${error instanceof Error ? error.message : String(error)}`
@@ -589,7 +555,7 @@ export class OvertureGeocoder {
   }
 
   /**
-   * Get nearby addresses from Overture S3 using DuckDB spatial query.
+   * Get nearby addresses from Overture S3.
    *
    * Queries the Overture addresses theme directly from S3 within a radius
    * of the given coordinates. Returns structured address components.
@@ -607,54 +573,35 @@ export class OvertureGeocoder {
     const radiusKm = options.radiusKm ?? 0.5;
     const limit = options.limit ?? 10;
 
-    // Convert km to approximate degrees for bounding box filter
-    const latDelta = radiusKm / 111;
-    const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
-
-    const query = `
-      SELECT
-        id,
-        number,
-        street,
-        unit,
-        postcode,
-        freeform,
-        ST_X(geometry) as lon,
-        ST_Y(geometry) as lat,
-        -- Haversine distance calculation
-        6371 * 2 * ASIN(SQRT(
-          POWER(SIN((RADIANS(ST_Y(geometry)) - RADIANS(${lat})) / 2), 2) +
-          COS(RADIANS(${lat})) * COS(RADIANS(ST_Y(geometry))) *
-          POWER(SIN((RADIANS(ST_X(geometry)) - RADIANS(${lon})) / 2), 2)
-        )) as distance_km
-      FROM read_parquet(
-        's3://overturemaps-us-west-2/release/__LATEST__/theme=addresses/type=address/*',
-        hive_partitioning = true
-      )
-      WHERE bbox.xmin <= ${lon + lonDelta} AND bbox.xmax >= ${lon - lonDelta}
-        AND bbox.ymin <= ${lat + latDelta} AND bbox.ymax >= ${lat - latDelta}
-      ORDER BY distance_km ASC
-      LIMIT ${limit * 2}
-    `;
+    // Convert km to approximate degrees for bounding box
+    const bbox = this.radiusToBbox(lat, lon, radiusKm);
 
     try {
-      const rows = await queryOverture(query);
+      // Fetch more than needed since we'll filter by exact distance
+      const features = await readByBboxAll("address", bbox, { limit: limit * 3 });
 
-      // Post-filter to exact radius and limit
-      return rows
-        .filter((row: Record<string, unknown>) => (row.distance_km as number) <= radiusKm)
-        .slice(0, limit)
-        .map((row: Record<string, unknown>) => ({
-          id: row.id as string,
-          number: row.number as string | undefined,
-          street: row.street as string | undefined,
-          unit: row.unit as string | undefined,
-          postcode: row.postcode as string | undefined,
-          freeform: row.freeform as string | undefined,
-          lat: row.lat as number,
-          lon: row.lon as number,
-          distance_km: row.distance_km as number,
-        }));
+      // Calculate distances and filter
+      return features
+        .map((f) => {
+          const props = f.properties as Record<string, unknown>;
+          const coords = (f.geometry as { coordinates: [number, number] }).coordinates;
+          const fLon = coords[0];
+          const fLat = coords[1];
+          return {
+            id: f.id as string,
+            number: props.number as string | undefined,
+            street: props.street as string | undefined,
+            unit: props.unit as string | undefined,
+            postcode: props.postcode as string | undefined,
+            freeform: props.freeform as string | undefined,
+            lat: fLat,
+            lon: fLon,
+            distance_km: this.haversineDistance(lat, lon, fLat, fLon),
+          };
+        })
+        .filter((a) => a.distance_km <= radiusKm)
+        .sort((a, b) => a.distance_km - b.distance_km)
+        .slice(0, limit);
     } catch (error) {
       throw new GeocoderError(
         `Failed to query nearby addresses: ${error instanceof Error ? error.message : String(error)}`
@@ -867,6 +814,44 @@ export class OvertureGeocoder {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Convert a radius in km to a bounding box centered on lat/lon
+   */
+  private radiusToBbox(lat: number, lon: number, radiusKm: number): BoundingBox {
+    // 1 degree latitude ≈ 111 km, longitude varies by latitude
+    const latDelta = radiusKm / 111;
+    const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+
+    return {
+      xmin: lon - lonDelta,
+      ymin: lat - latDelta,
+      xmax: lon + lonDelta,
+      ymax: lat + latDelta,
+    };
+  }
+
+  /**
+   * Calculate Haversine distance between two points in km
+   */
+  private haversineDistance(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number {
+    const R = 6371; // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
 }
 

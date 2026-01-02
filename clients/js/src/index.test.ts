@@ -537,26 +537,6 @@ describe("getNearbyPlaces", () => {
     const client = new OvertureGeocoder();
     expect(typeof client.getNearbyPlaces).toBe("function");
   });
-
-  it("should accept NearbySearchOptions", async () => {
-    const client = new OvertureGeocoder();
-
-    // Mock the queryOverture function to avoid actual S3 calls
-    vi.mock("./duckdb-query.js", () => ({
-      queryOverture: vi.fn().mockRejectedValue(new Error("DuckDB not available")),
-      closeDuckDB: vi.fn(),
-      isDuckDBAvailable: vi.fn().mockReturnValue(false),
-    }));
-
-    // Expect it to throw because DuckDB isn't actually available
-    await expect(
-      client.getNearbyPlaces(42.3501, -71.0789, {
-        radiusKm: 0.5,
-        limit: 5,
-        category: "restaurant",
-      })
-    ).rejects.toThrow();
-  });
 });
 
 describe("getNearbyAddresses", () => {

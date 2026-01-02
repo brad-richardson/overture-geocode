@@ -1,5 +1,4 @@
-export { StacCatalog, StacLink, clearCache as clearCatalogCache, getLatestRelease, getStacCatalog } from '@bradrichardson/overturemaps';
-export { closeDuckDB, isDuckDBAvailable, queryOverture } from './duckdb-query.js';
+export { BoundingBox, Feature, OvertureType, StacCatalog, StacLink, clearCache as clearCatalogCache, getLatestRelease, getStacCatalog, readByBbox, readByBboxAll } from '@bradrichardson/overturemaps';
 
 /**
  * Overture Geocoder JavaScript/TypeScript Client
@@ -273,12 +272,12 @@ declare class OvertureGeocoder {
      */
     getFullGeometry(gersId: string): Promise<GeoJSONFeature | null>;
     /**
-     * Close all DuckDB connections and release resources.
+     * Close DuckDB connection and release resources.
      * Call this when done with geometry/place/address fetching to free memory.
      */
     close(): Promise<void>;
     /**
-     * Get nearby places from Overture S3 using DuckDB spatial query.
+     * Get nearby places from Overture S3.
      *
      * Queries the Overture places theme directly from S3 within a radius
      * of the given coordinates. Results include business names, categories,
@@ -291,7 +290,7 @@ declare class OvertureGeocoder {
      */
     getNearbyPlaces(lat: number, lon: number, options?: NearbySearchOptions): Promise<OverturePlace[]>;
     /**
-     * Get nearby addresses from Overture S3 using DuckDB spatial query.
+     * Get nearby addresses from Overture S3.
      *
      * Queries the Overture addresses theme directly from S3 within a radius
      * of the given coordinates. Returns structured address components.
@@ -324,6 +323,14 @@ declare class OvertureGeocoder {
     private parseReverseResults;
     private pointInPolygon;
     private delay;
+    /**
+     * Convert a radius in km to a bounding box centered on lat/lon
+     */
+    private radiusToBbox;
+    /**
+     * Calculate Haversine distance between two points in km
+     */
+    private haversineDistance;
 }
 /**
  * Quick geocode function using default settings.
