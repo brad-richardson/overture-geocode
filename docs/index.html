@@ -446,7 +446,7 @@
           <circle cx="11" cy="11" r="8"/>
           <path d="m21 21-4.35-4.35"/>
         </svg>
-        <input type="text" class="search-input" id="search-input" placeholder="Search for a place..." autocomplete="off">
+        <input type="text" class="search-input" id="search-input" placeholder="Search for a place..." autocomplete="off" aria-label="Search for a place">
       </div>
       <div class="hint">
         <span>Press Enter or click Search</span>
@@ -457,15 +457,15 @@
     <div id="reverse-panel" style="display: none;">
       <div class="coords-container">
         <div class="coord-input-group">
-          <label class="coord-label">Latitude</label>
-          <input type="number" class="coord-input" id="lat-input" placeholder="42.3601" step="any">
+          <label class="coord-label" for="lat-input">Latitude</label>
+          <input type="number" class="coord-input" id="lat-input" placeholder="42.3601" step="any" aria-describedby="coords-hint">
         </div>
         <div class="coord-input-group">
-          <label class="coord-label">Longitude</label>
-          <input type="number" class="coord-input" id="lon-input" placeholder="-71.0589" step="any">
+          <label class="coord-label" for="lon-input">Longitude</label>
+          <input type="number" class="coord-input" id="lon-input" placeholder="-71.0589" step="any" aria-describedby="coords-hint">
         </div>
       </div>
-      <div class="hint">
+      <div class="hint" id="coords-hint">
         <span>Click on map or enter coordinates</span>
       </div>
       <button class="search-btn" id="reverse-btn">Lookup Location</button>
@@ -481,8 +481,18 @@
   </div>
 
   <script>
-    // API Configuration
-    const API_BASE_URL = 'https://overture-geocoder.bradr.workers.dev';
+    // Configuration Constants
+    const DEFAULT_API_URL = 'https://overture-geocoder.bradr.workers.dev';
+    const SEARCH_LIMIT = 10;
+    const MAP_PADDING = 100;
+    const FIT_MAX_ZOOM = 14;
+    const REVERSE_RESULT_ZOOM = 12;
+    const DEFAULT_CENTER = [-71.0589, 42.3601]; // Boston
+    const DEFAULT_ZOOM = 10;
+
+    // Allow API URL override via query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const API_BASE_URL = urlParams.get('api') || DEFAULT_API_URL;
 
     // PMTiles URLs from Overture Maps
     const PMTILES_SOURCES = {
@@ -690,8 +700,8 @@
           }
         ]
       },
-      center: [-71.0589, 42.3601], // Boston
-      zoom: 10,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
       maxZoom: 18
     });
 
@@ -714,6 +724,11 @@
     const reverseBtn = document.getElementById('reverse-btn');
     const resultsContainer = document.getElementById('results');
 
+    // Update cursor style based on mode
+    function updateCursor() {
+      map.getCanvas().style.cursor = currentTab === 'reverse' ? 'crosshair' : '';
+    }
+
     // Tab switching
     tabs.forEach(tab => {
       tab.addEventListener('click', () => {
@@ -731,6 +746,7 @@
 
         clearResults();
         clearMarkers();
+        updateCursor();
       });
     });
 
@@ -743,13 +759,13 @@
         const params = new URLSearchParams({
           q: query,
           format: 'jsonv2',
-          limit: '10'
+          limit: String(SEARCH_LIMIT)
         });
 
         const response = await fetch(`${API_BASE_URL}/search?${params}`);
 
         if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
+          throw new Error(getErrorMessage(response.status, 'search'));
         }
 
         const data = await response.json();
@@ -779,7 +795,7 @@
         const response = await fetch(`${API_BASE_URL}/reverse?${params}`);
 
         if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
+          throw new Error(getErrorMessage(response.status, 'reverse lookup'));
         }
 
         const data = await response.json();
@@ -795,10 +811,28 @@
           data.forEach(r => {
             bounds.extend([r.lon, r.lat]);
           });
-          map.fitBounds(bounds, { padding: 100, maxZoom: 14 });
+          map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
         }
       } catch (error) {
         showError(error.message);
+      }
+    }
+
+    // Get user-friendly error message
+    function getErrorMessage(status, action) {
+      switch (status) {
+        case 400:
+          return `Invalid ${action} request. Please check your input and try again.`;
+        case 404:
+          return `The ${action} service could not be found. Please try again later.`;
+        case 429:
+          return 'Too many requests. Please wait a moment and try again.';
+        case 500:
+        case 502:
+        case 503:
+          return `The ${action} service is temporarily unavailable. Please try again later.`;
+        default:
+          return `Unable to complete ${action} (error ${status}). Please try again.`;
       }
     }
 
@@ -830,7 +864,7 @@
         item.addEventListener('click', () => {
           const lat = parseFloat(item.dataset.lat);
           const lon = parseFloat(item.dataset.lon);
-          map.flyTo({ center: [lon, lat], zoom: 14 });
+          map.flyTo({ center: [lon, lat], zoom: FIT_MAX_ZOOM });
 
           // Show popup
           if (popup) popup.remove();
@@ -861,13 +895,13 @@
           <div class="result-item" data-index="${index}" data-lat="${result.lat}" data-lon="${result.lon}">
             <div class="result-name">${escapeHtml(result.primary_name)}</div>
             <div class="result-meta">
-              <span class="result-type">${result.subtype}</span>
+              <span class="result-type">${escapeHtml(result.subtype)}</span>
               <span class="result-coords">${result.distance_km.toFixed(2)} km</span>
             </div>
             ${result.hierarchy ? `
               <div class="hierarchy">
                 ${result.hierarchy.map(h => `
-                  <div class="hierarchy-item">${escapeHtml(h.name)} (${h.subtype})</div>
+                  <div class="hierarchy-item">${escapeHtml(h.name)} (${escapeHtml(h.subtype)})</div>
                 `).join('')}
               </div>
             ` : ''}
@@ -882,7 +916,7 @@
         item.addEventListener('click', () => {
           const lat = parseFloat(item.dataset.lat);
           const lon = parseFloat(item.dataset.lon);
-          map.flyTo({ center: [lon, lat], zoom: 12 });
+          map.flyTo({ center: [lon, lat], zoom: REVERSE_RESULT_ZOOM });
         });
       });
     }
@@ -892,6 +926,9 @@
       results.forEach((result, index) => {
         const el = document.createElement('div');
         el.className = 'marker';
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('aria-label', `Result ${index + 1}: ${result.primary_name}`);
         el.style.cssText = `
           width: 24px;
           height: 24px;
@@ -913,16 +950,24 @@
           .setLngLat([result.lon, result.lat])
           .addTo(map);
 
-        el.addEventListener('click', () => {
+        const showMarkerPopup = () => {
           if (popup) popup.remove();
           popup = new maplibregl.Popup()
             .setLngLat([result.lon, result.lat])
             .setHTML(`
               <div class="popup-title">${escapeHtml(result.primary_name)}</div>
-              <div class="popup-type">${result.type || result.subtype || 'place'}</div>
+              <div class="popup-type">${escapeHtml(result.type || result.subtype || 'place')}</div>
               <div class="popup-coords">${result.lat.toFixed(5)}, ${result.lon.toFixed(5)}</div>
             `)
             .addTo(map);
+        };
+
+        el.addEventListener('click', showMarkerPopup);
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            showMarkerPopup();
+          }
         });
 
         markers.push(marker);
@@ -957,7 +1002,7 @@
         bounds.extend([r.lon, r.lat]);
       });
 
-      map.fitBounds(bounds, { padding: 100, maxZoom: 14 });
+      map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
     }
 
     // Clear markers
@@ -1037,14 +1082,10 @@
       }
     });
 
-    // Change cursor in reverse mode
-    map.on('mousemove', () => {
-      if (currentTab === 'reverse') {
-        map.getCanvas().style.cursor = 'crosshair';
-      } else {
-        map.getCanvas().style.cursor = '';
-      }
-    });
+    // Update cursor on map load and when entering the map canvas
+    const canvas = map.getCanvas();
+    canvas.addEventListener('mouseenter', updateCursor);
+    map.on('load', updateCursor);
   </script>
 </body>
 </html>
