@@ -4,6 +4,11 @@
  * Forward geocoding API using Overture Maps data.
  */
 
+// Rate limiter binding type
+interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env {
   // Global divisions database (forward geocoding)
   DB_DIVISIONS: D1Database;
@@ -14,6 +19,8 @@ export interface Env {
   // Add more states as needed:
   // DB_CA?: D1Database;
   // DB_TX?: D1Database;
+  // Rate limiting
+  RATE_LIMITER: RateLimiter;
 }
 
 interface GeocoderResult {
@@ -524,6 +531,35 @@ async function handleSearch(
 }
 
 /**
+ * Check rate limit for incoming request.
+ * Returns a 429 response if limit exceeded, null otherwise.
+ */
+async function checkRateLimit(
+  env: Env,
+  request: Request
+): Promise<Response | null> {
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const { success } = await env.RATE_LIMITER.limit({ key: ip });
+
+  if (!success) {
+    return new Response(
+      JSON.stringify({ error: "Rate limit exceeded. Please slow down." }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": "60",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      }
+    );
+  }
+  return null;
+}
+
+/**
  * Create JSON response with CORS headers.
  */
 function jsonResponse(data: unknown, status = 200): Response {
@@ -553,6 +589,10 @@ export default {
         },
       });
     }
+
+    // Rate limit check
+    const rateLimitResponse = await checkRateLimit(env, request);
+    if (rateLimitResponse) return rateLimitResponse;
 
     const url = new URL(request.url);
 

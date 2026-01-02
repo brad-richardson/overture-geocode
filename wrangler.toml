@@ -24,3 +24,9 @@ database_id = "07908a36-a6a0-4823-8381-19996691c7d2"
 # [[r2_buckets]]
 # binding = "R2_CACHE"
 # bucket_name = "overture-geocoder-cache"
+
+# Rate limiting (60 requests per 60 seconds per IP)
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }
