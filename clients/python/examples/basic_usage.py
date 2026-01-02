@@ -49,15 +49,6 @@ def main():
         limited = client.search("Main St", limit=5)
         print(f"Limited to 5 results: {len(limited)}")
 
-        # Include address details
-        with_address = client.search("123 Main St", addressdetails=True, limit=1)
-        if with_address and with_address[0].address:
-            addr = with_address[0].address
-            print("Address breakdown:")
-            print(f"  City: {addr.city}")
-            print(f"  State: {addr.state}")
-            print(f"  Postcode: {addr.postcode}")
-
         # =====================================================================
         # GeoJSON format
         # =====================================================================

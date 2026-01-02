@@ -4,40 +4,25 @@ import pytest
 import httpx
 
 
-# Mock response data
+# Mock response data - using numbers to match actual server responses
 MOCK_SEARCH_RESULTS = [
     {
         "gers_id": "abc-123",
-        "primary_name": "123 Main St, Boston, MA 02101",
-        "lat": "42.3601000",
-        "lon": "-71.0589000",
-        "boundingbox": ["42.3600000", "42.3602000", "-71.0590000", "-71.0588000"],
+        "primary_name": "Boston",
+        "lat": 42.3601,
+        "lon": -71.0589,
+        "boundingbox": [42.227, 42.397, -71.191, -70.923],
         "importance": 0.85,
-        "type": "address",
+        "type": "locality",
     },
     {
         "gers_id": "def-456",
-        "primary_name": "456 Oak Ave, Boston, MA 02102",
-        "lat": "42.3611000",
-        "lon": "-71.0599000",
-        "boundingbox": ["42.3610000", "42.3612000", "-71.0600000", "-71.0598000"],
+        "primary_name": "Cambridge",
+        "lat": 42.3736,
+        "lon": -71.1097,
+        "boundingbox": [42.352, 42.404, -71.161, -71.064],
         "importance": 0.75,
-        "type": "address",
-    },
-]
-
-MOCK_SEARCH_RESULTS_WITH_ADDRESS = [
-    {
-        **MOCK_SEARCH_RESULTS[0],
-        "address": {
-            "house_number": "123",
-            "road": "Main St",
-            "city": "Boston",
-            "state": "MA",
-            "postcode": "02101",
-            "country": "United States",
-            "country_code": "us",
-        },
+        "type": "locality",
     },
 ]
 
@@ -49,10 +34,11 @@ MOCK_GEOJSON_RESPONSE = {
             "id": "abc-123",
             "properties": {
                 "gers_id": "abc-123",
-                "primary_name": "123 Main St, Boston, MA 02101",
+                "primary_name": "Boston",
                 "importance": 0.85,
+                "type": "locality",
             },
-            "bbox": [42.36, 42.3602, -71.059, -71.0588],
+            "bbox": [42.227, 42.397, -71.191, -70.923],
             "geometry": {
                 "type": "Point",
                 "coordinates": [-71.0589, 42.3601],
@@ -66,12 +52,6 @@ MOCK_GEOJSON_RESPONSE = {
 def mock_search_results():
     """Return mock search results."""
     return MOCK_SEARCH_RESULTS
-
-
-@pytest.fixture
-def mock_search_results_with_address():
-    """Return mock search results with address details."""
-    return MOCK_SEARCH_RESULTS_WITH_ADDRESS
 
 
 @pytest.fixture

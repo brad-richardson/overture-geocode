@@ -192,26 +192,32 @@ function haversineDistance(
   return R * c;
 }
 
+// Type priority for hierarchy ordering (lower = more specific)
+const TYPE_PRIORITY: Record<string, number> = {
+  neighborhood: 1,
+  macrohood: 2,
+  locality: 3,
+  localadmin: 4,
+  county: 5,
+  region: 6,
+  country: 7,
+};
+
 /**
- * Build hierarchy from overlapping division candidates.
- * Candidates are sorted by type priority (most specific first).
- * Only keeps the smallest (most specific) division per subtype to avoid
- * including neighboring divisions with overlapping bboxes.
+ * Build hierarchy for a specific division.
+ * Returns the division itself plus all containing (larger) divisions.
+ * Sorted by type priority (most specific first).
  */
-function buildHierarchy(candidates: DivisionReverseRow[]): HierarchyEntry[] {
-  const typePriority: Record<string, number> = {
-    neighborhood: 1,
-    macrohood: 2,
-    locality: 3,
-    localadmin: 4,
-    county: 5,
-    region: 6,
-    country: 7,
-  };
+function buildHierarchyForDivision(
+  currentDiv: DivisionReverseRow,
+  allCandidates: DivisionReverseRow[]
+): HierarchyEntry[] {
+  // Filter to divisions with area >= current (includes itself and larger containing divisions)
+  const containing = allCandidates.filter((div) => div.area >= currentDiv.area);
 
   // Deduplicate by subtype, keeping smallest area (candidates already sorted by area ASC)
   const seenSubtypes = new Set<string>();
-  const deduped = candidates.filter((div) => {
+  const deduped = containing.filter((div) => {
     if (seenSubtypes.has(div.subtype)) {
       return false;
     }
@@ -220,7 +226,7 @@ function buildHierarchy(candidates: DivisionReverseRow[]): HierarchyEntry[] {
   });
 
   return deduped
-    .sort((a, b) => (typePriority[a.subtype] || 0) - (typePriority[b.subtype] || 0))
+    .sort((a, b) => (TYPE_PRIORITY[a.subtype] || 0) - (TYPE_PRIORITY[b.subtype] || 0))
     .map((div) => ({
       gers_id: div.gers_id,
       subtype: div.subtype,
@@ -280,10 +286,7 @@ async function handleReverse(
       return jsonResponse([]);
     }
 
-    // Build hierarchy from overlapping candidates (sorted by specificity)
-    const hierarchy = buildHierarchy(candidates);
-
-    // Format results
+    // Format results with per-division hierarchy
     const results: ReverseGeocoderResult[] = candidates.map((div) => ({
       gers_id: div.gers_id,
       primary_name: div.primary_name,
@@ -293,7 +296,7 @@ async function handleReverse(
       boundingbox: [div.bbox_ymin, div.bbox_ymax, div.bbox_xmin, div.bbox_xmax],
       distance_km: Math.round(haversineDistance(lat, lon, div.lat, div.lon) * 100) / 100,
       confidence: "bbox" as const,
-      hierarchy,
+      hierarchy: buildHierarchyForDivision(div, candidates),
     }));
 
     if (format === "geojson") {
@@ -310,6 +313,7 @@ async function handleReverse(
             confidence: r.confidence,
             hierarchy: r.hierarchy,
           },
+          bbox: r.boundingbox,
           geometry: {
             type: "Point",
             coordinates: [r.lon, r.lat],
@@ -338,7 +342,7 @@ async function handleSearch(
   const q = url.searchParams.get("q") || "";
   const format = url.searchParams.get("format") || "jsonv2";
   const limit = Math.min(
-    Math.max(1, parseInt(url.searchParams.get("limit") || "10")),
+    Math.max(1, parseInt(url.searchParams.get("limit") || "10") || 10),
     40
   );
   // autocomplete: default to 1 (enabled) for prefix matching on last token

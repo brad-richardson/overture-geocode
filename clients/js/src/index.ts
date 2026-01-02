@@ -25,7 +25,7 @@ export interface GeocoderResult {
   lon: number;
   boundingbox: [number, number, number, number];
   importance: number;
-  type?: string;
+  type: string;
 }
 
 export interface SearchOptions {
@@ -418,7 +418,7 @@ export class OvertureGeocoder {
         lon: record.lon as number,
         boundingbox: record.boundingbox as [number, number, number, number],
         importance: (record.importance as number) || 0,
-        type: record.type as string | undefined,
+        type: (record.type as string) || "unknown",
       };
     });
   }
