@@ -143,42 +143,5 @@ fn uuid_v4() -> String {
     format!("{:032x}", timestamp)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Tests require a built index file
-    // Run: python scripts/build_divisions_index.py first
-
-    #[test]
-    #[ignore = "requires built index at indexes/divisions-global.db"]
-    fn test_search_boston() {
-        let db = Database::open("../../indexes/divisions-global.db").unwrap();
-        let query = GeocoderQuery::new("boston");
-        let results = db.search(&query).unwrap();
-
-        assert!(!results.is_empty());
-        // Boston, MA should be in the top results
-        let has_boston_ma = results
-            .iter()
-            .any(|r| r.primary_name.contains("Boston") && r.region.as_deref() == Some("US-MA"));
-        assert!(has_boston_ma);
-    }
-
-    #[test]
-    #[ignore = "requires built index at indexes/divisions-global.db"]
-    fn test_search_paris() {
-        let db = Database::open("../../indexes/divisions-global.db").unwrap();
-        let query = GeocoderQuery::new("paris");
-        let results = db.search(&query).unwrap();
-
-        assert!(!results.is_empty());
-        // Paris, FR should rank highly due to population
-        let paris_fr_idx = results
-            .iter()
-            .position(|r| r.country.as_deref() == Some("FR"));
-        assert!(paris_fr_idx.is_some());
-        // Should be in top 3
-        assert!(paris_fr_idx.unwrap() < 3);
-    }
-}
+// Integration tests for Database are in crates/geocoder-core/tests/
+// They require built shards: python scripts/build_shards.py --countries US

@@ -7,9 +7,9 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2024"
-license = "Apache-2.0"
-repository = "https://github.com/bradrichardson/overture-geocoder"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/brad-richardson/overture-geocoder"
 
 [workspace.dependencies]
 # Serialization
