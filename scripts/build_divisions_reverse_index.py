@@ -120,22 +120,19 @@ def build_divisions_reverse_index(
         inserted += len(batch)
         print(f"  Progress: {inserted:,} / {total_count:,} (100%)")
 
-    # Create spatial indexes for bbox queries
-    # These indexes enable efficient queries like:
+    # Create composite spatial index for bbox queries (more efficient than 4 separate indexes)
+    # Enables efficient queries like:
     #   WHERE bbox_xmin <= lon AND bbox_xmax >= lon
     #     AND bbox_ymin <= lat AND bbox_ymax >= lat
-    print("Creating spatial indexes...")
-    db.execute("CREATE INDEX idx_bbox_xmin ON divisions_reverse(bbox_xmin)")
-    db.execute("CREATE INDEX idx_bbox_xmax ON divisions_reverse(bbox_xmax)")
-    db.execute("CREATE INDEX idx_bbox_ymin ON divisions_reverse(bbox_ymin)")
-    db.execute("CREATE INDEX idx_bbox_ymax ON divisions_reverse(bbox_ymax)")
+    print("Creating spatial index...")
+    db.execute("CREATE INDEX idx_bbox ON divisions_reverse(bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax)")
 
-    # Additional indexes for filtering and lookups
-    print("Creating additional indexes...")
-    db.execute("CREATE INDEX idx_gers ON divisions_reverse(gers_id)")
-    db.execute("CREATE INDEX idx_subtype ON divisions_reverse(subtype)")
-    db.execute("CREATE INDEX idx_country ON divisions_reverse(country)")
+    # Area index for ORDER BY optimization
+    print("Creating area index...")
     db.execute("CREATE INDEX idx_area ON divisions_reverse(area)")
+
+    # Note: idx_gers redundant with UNIQUE constraint
+    # Note: idx_subtype, idx_country removed as unused in current queries
 
     # Store metadata
     db.execute("INSERT INTO metadata VALUES ('type', 'divisions-reverse')")

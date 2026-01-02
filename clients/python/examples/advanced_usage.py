@@ -157,7 +157,7 @@ def custom_client_example():
             results = client.search("Boston City Hall", limit=3)
             print(f"Found {len(results)} results")
             for r in results:
-                print(f"  - {r.display_name}")
+                print(f"  - {r.primary_name}")
     finally:
         http_client.close()
 
@@ -208,7 +208,7 @@ def factory_example():
             results = client.search("Boston City Hall", limit=3)
             print(f"Found {len(results)} results")
             for r in results:
-                print(f"  - {r.display_name}")
+                print(f"  - {r.primary_name}")
     except GeocoderError as e:
         print(f"Search failed: {e}")
 

@@ -26,30 +26,11 @@ export interface GeocoderResult {
   boundingbox: [number, number, number, number];
   importance: number;
   type?: string;
-  address?: AddressDetails;
-}
-
-export interface AddressDetails {
-  house_number?: string;
-  road?: string;
-  city?: string;
-  state?: string;
-  postcode?: string;
-  country?: string;
-  country_code?: string;
 }
 
 export interface SearchOptions {
   /** Maximum number of results (1-40, default: 10) */
   limit?: number;
-  /** Comma-separated ISO 3166-1 alpha-2 country codes */
-  countrycodes?: string;
-  /** Bounding box [lon1, lat1, lon2, lat2] */
-  viewbox?: [number, number, number, number];
-  /** Restrict results to viewbox */
-  bounded?: boolean;
-  /** Include address breakdown in results */
-  addressdetails?: boolean;
   /** Response format */
   format?: "json" | "jsonv2" | "geojson";
 }
@@ -192,11 +173,6 @@ export class OvertureGeocoder {
       limit: String(Math.min(Math.max(1, options.limit || 10), 40)),
     });
 
-    if (options.countrycodes) params.set("countrycodes", options.countrycodes);
-    if (options.viewbox) params.set("viewbox", options.viewbox.join(","));
-    if (options.bounded) params.set("bounded", "1");
-    if (options.addressdetails) params.set("addressdetails", "1");
-
     const url = `${this.baseUrl}/search?${params}`;
     const response = await this.fetchWithRetry(url);
     const data = await response.json();
@@ -220,11 +196,6 @@ export class OvertureGeocoder {
       format: "geojson",
       limit: String(Math.min(Math.max(1, options.limit || 10), 40)),
     });
-
-    if (options.countrycodes) params.set("countrycodes", options.countrycodes);
-    if (options.viewbox) params.set("viewbox", options.viewbox.join(","));
-    if (options.bounded) params.set("bounded", "1");
-    if (options.addressdetails) params.set("addressdetails", "1");
 
     const url = `${this.baseUrl}/search?${params}`;
     const response = await this.fetchWithRetry(url);
@@ -443,17 +414,11 @@ export class OvertureGeocoder {
       return {
         gers_id: record.gers_id as string,
         primary_name: record.primary_name as string,
-        lat: parseFloat(record.lat as string),
-        lon: parseFloat(record.lon as string),
-        boundingbox: (record.boundingbox as string[]).map(parseFloat) as [
-          number,
-          number,
-          number,
-          number
-        ],
+        lat: record.lat as number,
+        lon: record.lon as number,
+        boundingbox: record.boundingbox as [number, number, number, number],
         importance: (record.importance as number) || 0,
         type: record.type as string | undefined,
-        address: record.address as AddressDetails | undefined,
       };
     });
   }

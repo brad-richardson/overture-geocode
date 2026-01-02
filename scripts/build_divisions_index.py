@@ -77,7 +77,8 @@ def build_divisions_index(
             search_text,
             content=divisions,
             content_rowid=rowid,
-            tokenize='porter unicode61 remove_diacritics 1'
+            tokenize='porter unicode61 remove_diacritics 1',
+            prefix='2 3'
         )
     """)
 
@@ -147,11 +148,8 @@ def build_divisions_index(
         inserted += len(batch)
         print(f"  Progress: {inserted:,} / {total_count:,} (100%)")
 
-    # Create indexes
-    print("Creating indexes...")
-    db.execute("CREATE INDEX idx_gers ON divisions(gers_id)")
-    db.execute("CREATE INDEX idx_type ON divisions(type)")
-    db.execute("CREATE INDEX idx_country ON divisions(country)")
+    # Note: gers_id already has UNIQUE constraint which creates implicit index
+    # idx_type and idx_country removed as they're not used in current queries
 
     # Optimize FTS index
     print("Optimizing FTS index...")

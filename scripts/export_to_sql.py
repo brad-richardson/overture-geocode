@@ -73,9 +73,8 @@ CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN
     VALUES (new.rowid, new.search_text);
 END;
 
--- Indexes (UNIQUE on gers_id already creates an index)
-CREATE INDEX idx_type ON divisions(type);
-CREATE INDEX idx_country ON divisions(country);
+-- Note: UNIQUE on gers_id already creates an index
+-- idx_type and idx_country removed as unused in current queries
 """
 
 
@@ -128,8 +127,8 @@ CREATE TRIGGER features_au AFTER UPDATE ON features BEGIN
     VALUES (new.rowid, new.search_text);
 END;
 
--- Indexes (UNIQUE on gers_id already creates an index)
-CREATE INDEX idx_type ON features(type);
+-- Note: UNIQUE on gers_id already creates an index
+-- idx_type removed as unused in current queries
 """
 
 
@@ -163,16 +162,14 @@ CREATE TABLE IF NOT EXISTS metadata (
     value TEXT NOT NULL
 );
 
--- Spatial indexes for bbox queries
-CREATE INDEX idx_bbox_xmin ON divisions_reverse(bbox_xmin);
-CREATE INDEX idx_bbox_xmax ON divisions_reverse(bbox_xmax);
-CREATE INDEX idx_bbox_ymin ON divisions_reverse(bbox_ymin);
-CREATE INDEX idx_bbox_ymax ON divisions_reverse(bbox_ymax);
+-- Composite spatial index for bbox queries (more efficient than 4 separate indexes)
+CREATE INDEX idx_bbox ON divisions_reverse(bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax);
 
--- Additional indexes
-CREATE INDEX idx_subtype ON divisions_reverse(subtype);
-CREATE INDEX idx_country ON divisions_reverse(country);
+-- Area index for ORDER BY optimization
 CREATE INDEX idx_area ON divisions_reverse(area);
+
+-- Note: idx_subtype and idx_country removed as unused in current queries
+-- Note: UNIQUE on gers_id already creates an index
 """
 
 

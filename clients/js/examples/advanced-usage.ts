@@ -266,7 +266,7 @@ async function main() {
     const results = await client.search("Boston City Hall", { limit: 3 });
     console.log(`Found ${results.length} results`);
     for (const r of results) {
-      console.log(`  - ${r.display_name}`);
+      console.log(`  - ${r.primary_name}`);
     }
   } catch (error) {
     console.error("Search failed:", error);

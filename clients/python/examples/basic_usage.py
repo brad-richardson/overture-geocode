@@ -16,7 +16,7 @@ def main():
     quick_results = geocode("123 Main St, Boston, MA")
     print(f"Found: {len(quick_results)} results")
     if quick_results:
-        print(f"First result: {quick_results[0].display_name}")
+        print(f"First result: {quick_results[0].primary_name}")
 
     # =========================================================================
     # Using the client class
@@ -35,7 +35,7 @@ def main():
         results = client.search("Boston City Hall")
         print(f"Search results: {len(results)}")
         for result in results[:3]:
-            print(f"  - {result.display_name}")
+            print(f"  - {result.primary_name}")
             print(f"    Lat: {result.lat}, Lon: {result.lon}")
             print(f"    GERS ID: {result.gers_id}")
 
@@ -54,20 +54,9 @@ def main():
         if with_address and with_address[0].address:
             addr = with_address[0].address
             print("Address breakdown:")
-            print(f"  House number: {addr.house_number}")
-            print(f"  Road: {addr.road}")
             print(f"  City: {addr.city}")
             print(f"  State: {addr.state}")
             print(f"  Postcode: {addr.postcode}")
-
-        # Search within a bounding box
-        in_box = client.search(
-            "coffee",
-            viewbox=(-71.1, 42.3, -71.0, 42.4),  # (lon1, lat1, lon2, lat2)
-            bounded=True,
-            limit=3,
-        )
-        print(f"Results in bounding box: {len(in_box)}")
 
         # =====================================================================
         # GeoJSON format

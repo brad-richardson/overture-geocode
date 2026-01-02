@@ -73,19 +73,6 @@ class GeocoderNetworkError(GeocoderError):
 
 
 @dataclass
-class AddressDetails:
-    """Parsed address components."""
-
-    house_number: Optional[str] = None
-    road: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    postcode: Optional[str] = None
-    country: Optional[str] = None
-    country_code: Optional[str] = None
-
-
-@dataclass
 class GeocoderResult:
     """A geocoding result."""
 
@@ -96,7 +83,6 @@ class GeocoderResult:
     boundingbox: list[float]
     importance: float
     type: Optional[str] = None
-    address: Optional[AddressDetails] = None
     _geocoder: Optional["OvertureGeocoder"] = field(default=None, repr=False)
 
     def get_geometry(self) -> Optional[dict[str, Any]]:
@@ -237,21 +223,13 @@ class OvertureGeocoder:
         query: str,
         *,
         limit: int = 10,
-        countrycodes: Optional[str] = None,
-        viewbox: Optional[tuple[float, float, float, float]] = None,
-        bounded: bool = False,
-        addressdetails: bool = False,
         format: str = "jsonv2",
     ) -> list[GeocoderResult]:
-        """Search for addresses matching the query.
+        """Search for divisions matching the query.
 
         Args:
             query: Free-form search string
             limit: Maximum results (1-40, default: 10)
-            countrycodes: Comma-separated ISO 3166-1 alpha-2 country codes
-            viewbox: Bounding box (lon1, lat1, lon2, lat2)
-            bounded: Restrict results to viewbox
-            addressdetails: Include address breakdown
             format: Response format ('json', 'jsonv2', 'geojson')
 
         Returns:
@@ -262,15 +240,6 @@ class OvertureGeocoder:
             "format": format,
             "limit": min(max(1, limit), 40),
         }
-
-        if countrycodes:
-            params["countrycodes"] = countrycodes
-        if viewbox:
-            params["viewbox"] = ",".join(map(str, viewbox))
-        if bounded:
-            params["bounded"] = "1"
-        if addressdetails:
-            params["addressdetails"] = "1"
 
         response = self._request_with_retry(f"{self.base_url}/search", params=params)
         data = response.json()
@@ -285,20 +254,12 @@ class OvertureGeocoder:
         query: str,
         *,
         limit: int = 10,
-        countrycodes: Optional[str] = None,
-        viewbox: Optional[tuple[float, float, float, float]] = None,
-        bounded: bool = False,
-        addressdetails: bool = False,
     ) -> dict[str, Any]:
         """Search and return results as GeoJSON FeatureCollection.
 
         Args:
             query: Free-form search string
             limit: Maximum results (1-40, default: 10)
-            countrycodes: Comma-separated ISO country codes
-            viewbox: Bounding box (lon1, lat1, lon2, lat2)
-            bounded: Restrict results to viewbox
-            addressdetails: Include address breakdown
 
         Returns:
             GeoJSON FeatureCollection dict
@@ -308,15 +269,6 @@ class OvertureGeocoder:
             "format": "geojson",
             "limit": min(max(1, limit), 40),
         }
-
-        if countrycodes:
-            params["countrycodes"] = countrycodes
-        if viewbox:
-            params["viewbox"] = ",".join(map(str, viewbox))
-        if bounded:
-            params["bounded"] = "1"
-        if addressdetails:
-            params["addressdetails"] = "1"
 
         response = self._request_with_retry(f"{self.base_url}/search", params=params)
         return response.json()
@@ -524,28 +476,14 @@ class OvertureGeocoder:
 
         results = []
         for r in data:
-            address = None
-            if "address" in r and r["address"]:
-                addr = r["address"]
-                address = AddressDetails(
-                    house_number=addr.get("house_number"),
-                    road=addr.get("road"),
-                    city=addr.get("city"),
-                    state=addr.get("state"),
-                    postcode=addr.get("postcode"),
-                    country=addr.get("country"),
-                    country_code=addr.get("country_code"),
-                )
-
             result = GeocoderResult(
                 gers_id=r["gers_id"],
                 primary_name=r["primary_name"],
-                lat=float(r["lat"]),
-                lon=float(r["lon"]),
-                boundingbox=[float(b) for b in r["boundingbox"]],
+                lat=r["lat"],  # Server now returns numbers
+                lon=r["lon"],  # Server now returns numbers
+                boundingbox=r["boundingbox"],  # Server now returns numbers
                 importance=r.get("importance", 0),
                 type=r.get("type"),
-                address=address,
                 _geocoder=self if include_geocoder else None,
             )
             results.append(result)

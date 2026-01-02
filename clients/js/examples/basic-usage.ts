@@ -4,7 +4,7 @@
  * Run with: npx tsx examples/basic-usage.ts
  */
 
-import { OvertureGeocoder, geocode, lookup } from "../src/index";
+import { OvertureGeocoder, geocode } from "../src/index";
 
 async function main() {
   // ==========================================================================
@@ -15,7 +15,7 @@ async function main() {
   const quickResults = await geocode("123 Main St, Boston, MA");
   console.log("Found:", quickResults.length, "results");
   if (quickResults.length > 0) {
-    console.log("First result:", quickResults[0].display_name);
+    console.log("First result:", quickResults[0].primary_name);
   }
 
   // ==========================================================================
@@ -35,7 +35,7 @@ async function main() {
   const results = await client.search("Boston City Hall");
   console.log("Search results:", results.length);
   for (const result of results.slice(0, 3)) {
-    console.log(`  - ${result.display_name}`);
+    console.log(`  - ${result.primary_name}`);
     console.log(`    Lat: ${result.lat}, Lon: ${result.lon}`);
     console.log(`    GERS ID: ${result.gers_id}`);
   }
@@ -57,20 +57,10 @@ async function main() {
   });
   if (withAddress.length > 0 && withAddress[0].address) {
     console.log("Address breakdown:");
-    console.log("  House number:", withAddress[0].address.house_number);
-    console.log("  Road:", withAddress[0].address.road);
     console.log("  City:", withAddress[0].address.city);
     console.log("  State:", withAddress[0].address.state);
     console.log("  Postcode:", withAddress[0].address.postcode);
   }
-
-  // Search within a bounding box
-  const inBox = await client.search("coffee", {
-    viewbox: [-71.1, 42.3, -71.0, 42.4], // [lon1, lat1, lon2, lat2]
-    bounded: true,
-    limit: 3,
-  });
-  console.log("Results in bounding box:", inBox.length);
 
   // ==========================================================================
   // GeoJSON format
@@ -89,31 +79,19 @@ async function main() {
   }
 
   // ==========================================================================
-  // Lookup by GERS ID
+  // Get full geometry from Overture S3
   // ==========================================================================
 
-  console.log("\n--- Lookup by GERS ID ---");
+  console.log("\n--- Get full geometry ---");
 
   if (results.length > 0) {
     const gersId = results[0].gers_id;
-    console.log("Looking up GERS ID:", gersId);
+    console.log("Fetching geometry for GERS ID:", gersId);
 
-    // Single lookup
-    const lookupResult = await client.lookup(gersId);
-    console.log("Lookup result:", lookupResult[0]?.display_name);
-
-    // Multiple lookups
-    if (results.length > 1) {
-      const ids = results.slice(0, 3).map((r) => r.gers_id);
-      const multiLookup = await client.lookup(ids);
-      console.log("Multi-lookup results:", multiLookup.length);
-    }
-
-    // Get geometry
-    const geometry = await client.getGeometry(gersId);
+    // Get full geometry from Overture S3
+    const geometry = await client.getFullGeometry(gersId);
     if (geometry) {
       console.log("Geometry type:", geometry.geometry.type);
-      console.log("Coordinates:", geometry.geometry.coordinates);
     }
   }
 

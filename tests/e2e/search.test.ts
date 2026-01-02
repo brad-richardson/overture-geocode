@@ -124,20 +124,22 @@ describe('/search endpoint', () => {
       expect(result.type).toBeDefined();
     });
 
-    it('should have lat/lon as strings with 7 decimal places', async () => {
+    it('should have lat/lon as numbers', async () => {
       const response = await fetch(`${baseUrl}/search?q=boston&limit=1`);
       const results = await response.json();
 
       const result = results[0];
-      expect(typeof result.lat).toBe('string');
-      expect(typeof result.lon).toBe('string');
+      expect(typeof result.lat).toBe('number');
+      expect(typeof result.lon).toBe('number');
 
-      // Should have 7 decimal places
-      expect(result.lat).toMatch(/^-?\d+\.\d{7}$/);
-      expect(result.lon).toMatch(/^-?\d+\.\d{7}$/);
+      // Should be valid coordinates
+      expect(result.lat).toBeGreaterThanOrEqual(-90);
+      expect(result.lat).toBeLessThanOrEqual(90);
+      expect(result.lon).toBeGreaterThanOrEqual(-180);
+      expect(result.lon).toBeLessThanOrEqual(180);
     });
 
-    it('should have boundingbox with 4 elements', async () => {
+    it('should have boundingbox with 4 numeric elements', async () => {
       const response = await fetch(`${baseUrl}/search?q=boston&limit=1`);
       const results = await response.json();
 
@@ -145,10 +147,10 @@ describe('/search endpoint', () => {
       expect(Array.isArray(result.boundingbox)).toBe(true);
       expect(result.boundingbox.length).toBe(4);
 
-      // All elements should be numeric strings
+      // All elements should be numbers
       for (const coord of result.boundingbox) {
-        expect(typeof coord).toBe('string');
-        expect(parseFloat(coord)).not.toBeNaN();
+        expect(typeof coord).toBe('number');
+        expect(coord).not.toBeNaN();
       }
     });
 
