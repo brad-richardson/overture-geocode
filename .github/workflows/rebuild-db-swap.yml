@@ -53,17 +53,27 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          pip install duckdb pyarrow
+          pip install duckdb pyarrow tomli tomli-w
 
       - name: Get current database info
         id: current_db
         run: |
-          # Extract current database ID from wrangler.toml
-          OLD_DB_NAME=$(grep -A2 'binding = "DB_DIVISIONS"' wrangler.toml | grep database_name | sed 's/.*= "\(.*\)"/\1/')
-          OLD_DB_ID=$(grep -A2 'binding = "DB_DIVISIONS"' wrangler.toml | grep database_id | sed 's/.*= "\(.*\)"/\1/')
-          echo "old_db_name=$OLD_DB_NAME" >> $GITHUB_OUTPUT
-          echo "old_db_id=$OLD_DB_ID" >> $GITHUB_OUTPUT
-          echo "Current database: $OLD_DB_NAME ($OLD_DB_ID)"
+          # Use Python to safely parse TOML
+          python3 << 'PYEOF'
+          import tomllib
+          import os
+
+          with open('wrangler.toml', 'rb') as f:
+              config = tomllib.load(f)
+
+          for db in config.get('d1_databases', []):
+              if db.get('binding') == 'DB_DIVISIONS':
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write(f"old_db_name={db['database_name']}\n")
+                      f.write(f"old_db_id={db['database_id']}\n")
+                  print(f"Current database: {db['database_name']} ({db['database_id']})")
+                  break
+          PYEOF
 
       - name: Create new D1 database
         id: new_db
@@ -71,21 +81,36 @@ jobs:
           NEW_DB_NAME="geocoder-divisions-${{ inputs.db_suffix }}"
           echo "Creating new database: $NEW_DB_NAME"
 
-          # Create the database and capture output
-          npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1 || true
-
-          # Check if database already exists
-          if grep -q "already exists" /tmp/db-create.json; then
-            echo "Database $NEW_DB_NAME already exists, fetching info..."
-            npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json
-            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
-          else
+          # Try to create the database
+          if npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1; then
             NEW_DB_ID=$(jq -r '.uuid' /tmp/db-create.json)
+            echo "Created new database with ID: $NEW_DB_ID"
+          else
+            # Check if it failed because database already exists
+            if grep -q "already exists" /tmp/db-create.json; then
+              echo "Database $NEW_DB_NAME already exists, fetching info..."
+              if ! npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json 2>&1; then
+                echo "Error: Failed to get info for existing database"
+                cat /tmp/db-info.json
+                exit 1
+              fi
+              NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
+            else
+              echo "Error: Failed to create database"
+              cat /tmp/db-create.json
+              exit 1
+            fi
+          fi
+
+          # Validate we got a valid UUID
+          if [ -z "$NEW_DB_ID" ] || [ "$NEW_DB_ID" = "null" ]; then
+            echo "Error: Failed to get valid database ID"
+            exit 1
           fi
 
           echo "new_db_name=$NEW_DB_NAME" >> $GITHUB_OUTPUT
           echo "new_db_id=$NEW_DB_ID" >> $GITHUB_OUTPUT
-          echo "Created database: $NEW_DB_NAME ($NEW_DB_ID)"
+          echo "Database ready: $NEW_DB_NAME ($NEW_DB_ID)"
 
       - name: Download divisions data
         run: |
@@ -106,6 +131,27 @@ jobs:
             --table divisions \
             --mode rebuild
 
+      - name: Validate export files exist
+        run: |
+          echo "Validating export files..."
+
+          # Check schema files exist
+          for schema_file in schema-base.sql schema-indexes.sql schema-fts.sql; do
+            if [ ! -f "exports/divisions/$schema_file" ]; then
+              echo "Error: Missing required file exports/divisions/$schema_file"
+              exit 1
+            fi
+            echo "  Found: $schema_file"
+          done
+
+          # Check at least one data file exists
+          DATA_FILES=$(ls exports/divisions/data-*.sql 2>/dev/null | wc -l)
+          if [ "$DATA_FILES" -eq 0 ]; then
+            echo "Error: No data files found in exports/divisions/"
+            exit 1
+          fi
+          echo "  Found: $DATA_FILES data chunk(s)"
+
       - name: Apply base schema
         run: |
           echo "Phase 1: Creating tables..."
@@ -116,12 +162,17 @@ jobs:
       - name: Load data chunks
         run: |
           echo "Phase 2: Loading data..."
+          CHUNK_COUNT=0
           for chunk in exports/divisions/data-*.sql; do
-            echo "  Loading $chunk..."
-            npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
-              --remote \
-              --file="$chunk"
+            if [ -f "$chunk" ]; then
+              echo "  Loading $chunk..."
+              npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+                --remote \
+                --file="$chunk"
+              CHUNK_COUNT=$((CHUNK_COUNT + 1))
+            fi
           done
+          echo "Loaded $CHUNK_COUNT data chunks"
 
       - name: Create indexes
         run: |
@@ -137,43 +188,55 @@ jobs:
             --remote \
             --file=exports/divisions/schema-fts.sql
 
-      - name: Verify new database
+      - name: Validate new database
+        id: validate
         run: |
-          echo "Verifying new database..."
-          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
-            --remote \
-            --command "SELECT COUNT(*) as count FROM divisions" --json
+          echo "Validating new database before deployment..."
 
-          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+          # Check row count
+          RESULT=$(npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
             --remote \
-            --command "SELECT name FROM sqlite_master WHERE type='table'" --json
+            --command "SELECT COUNT(*) as count FROM divisions" --json)
+          ROW_COUNT=$(echo "$RESULT" | jq -r '.[0].results[0].count')
+          echo "Row count: $ROW_COUNT"
+
+          if [ "$ROW_COUNT" -lt 1000 ]; then
+            echo "Error: Database has fewer than 1000 rows ($ROW_COUNT). Something went wrong."
+            exit 1
+          fi
+
+          # Check FTS works
+          FTS_RESULT=$(npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT COUNT(*) as count FROM divisions_fts WHERE divisions_fts MATCH 'boston'" --json)
+          FTS_COUNT=$(echo "$FTS_RESULT" | jq -r '.[0].results[0].count')
+          echo "FTS test (boston): $FTS_COUNT matches"
+
+          if [ "$FTS_COUNT" -eq 0 ]; then
+            echo "Error: FTS search returned no results. FTS may not be working correctly."
+            exit 1
+          fi
+
+          # Check tables exist
+          TABLES=$(npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" --json)
+          echo "Tables: $TABLES"
+
+          echo "row_count=$ROW_COUNT" >> $GITHUB_OUTPUT
+          echo "Validation passed!"
 
       - name: Update wrangler.toml
         run: |
           echo "Updating wrangler.toml with new database binding..."
+          python scripts/update_wrangler_binding.py \
+            DB_DIVISIONS \
+            "${{ steps.new_db.outputs.new_db_name }}" \
+            "${{ steps.new_db.outputs.new_db_id }}"
 
-          # Update database_name
-          sed -i 's/database_name = "geocoder-divisions-[^"]*"/database_name = "${{ steps.new_db.outputs.new_db_name }}"/' wrangler.toml
-
-          # Update database_id (for DB_DIVISIONS binding)
-          # This is a bit tricky - we need to update only the DB_DIVISIONS section
-          python3 << 'EOF'
-          import re
-
-          with open('wrangler.toml', 'r') as f:
-              content = f.read()
-
-          # Find and replace the DB_DIVISIONS section
-          pattern = r'(binding = "DB_DIVISIONS"\ndatabase_name = "[^"]*"\n)database_id = "[^"]*"'
-          replacement = r'\1database_id = "${{ steps.new_db.outputs.new_db_id }}"'
-          content = re.sub(pattern, replacement, content)
-
-          with open('wrangler.toml', 'w') as f:
-              f.write(content)
-          EOF
-
+          echo ""
           echo "Updated wrangler.toml:"
-          grep -A3 'DB_DIVISIONS' wrangler.toml
+          cat wrangler.toml
 
       - name: Deploy worker with new binding
         run: |
@@ -185,14 +248,21 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add wrangler.toml
-          git commit -m "chore: switch forward geocoding to ${{ steps.new_db.outputs.new_db_name }}"
+          git commit -m "chore: switch forward geocoding to ${{ steps.new_db.outputs.new_db_name }}
+
+          Database rebuild summary:
+          - Rows: ${{ steps.validate.outputs.row_count }}
+          - Old DB: ${{ steps.current_db.outputs.old_db_name }}
+          - New DB: ${{ steps.new_db.outputs.new_db_name }}"
           git push
 
       - name: Delete old database
         if: inputs.delete_old_db == true
         run: |
           echo "Deleting old database: ${{ steps.current_db.outputs.old_db_name }}"
-          npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation || true
+          if ! npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation; then
+            echo "Warning: Failed to delete old database. You may need to delete it manually."
+          fi
 
       - name: Summary
         run: |
@@ -202,6 +272,7 @@ jobs:
           echo "=========================================="
           echo "Old database: ${{ steps.current_db.outputs.old_db_name }}"
           echo "New database: ${{ steps.new_db.outputs.new_db_name }}"
+          echo "Row count: ${{ steps.validate.outputs.row_count }}"
           echo ""
           if [ "${{ inputs.delete_old_db }}" != "true" ]; then
             echo "Old database was kept. To delete it manually:"
@@ -228,16 +299,26 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci
-          pip install duckdb pyarrow
+          pip install duckdb pyarrow tomli tomli-w
 
       - name: Get current database info
         id: current_db
         run: |
-          OLD_DB_NAME=$(grep -A2 'binding = "DB_DIVISIONS_REVERSE"' wrangler.toml | grep database_name | sed 's/.*= "\(.*\)"/\1/')
-          OLD_DB_ID=$(grep -A2 'binding = "DB_DIVISIONS_REVERSE"' wrangler.toml | grep database_id | sed 's/.*= "\(.*\)"/\1/')
-          echo "old_db_name=$OLD_DB_NAME" >> $GITHUB_OUTPUT
-          echo "old_db_id=$OLD_DB_ID" >> $GITHUB_OUTPUT
-          echo "Current database: $OLD_DB_NAME ($OLD_DB_ID)"
+          python3 << 'PYEOF'
+          import tomllib
+          import os
+
+          with open('wrangler.toml', 'rb') as f:
+              config = tomllib.load(f)
+
+          for db in config.get('d1_databases', []):
+              if db.get('binding') == 'DB_DIVISIONS_REVERSE':
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                      f.write(f"old_db_name={db['database_name']}\n")
+                      f.write(f"old_db_id={db['database_id']}\n")
+                  print(f"Current database: {db['database_name']} ({db['database_id']})")
+                  break
+          PYEOF
 
       - name: Create new D1 database
         id: new_db
@@ -245,19 +326,33 @@ jobs:
           NEW_DB_NAME="geocoder-reverse-${{ inputs.db_suffix }}"
           echo "Creating new database: $NEW_DB_NAME"
 
-          npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1 || true
-
-          if grep -q "already exists" /tmp/db-create.json; then
-            echo "Database $NEW_DB_NAME already exists, fetching info..."
-            npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json
-            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
-          else
+          if npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1; then
             NEW_DB_ID=$(jq -r '.uuid' /tmp/db-create.json)
+            echo "Created new database with ID: $NEW_DB_ID"
+          else
+            if grep -q "already exists" /tmp/db-create.json; then
+              echo "Database $NEW_DB_NAME already exists, fetching info..."
+              if ! npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json 2>&1; then
+                echo "Error: Failed to get info for existing database"
+                cat /tmp/db-info.json
+                exit 1
+              fi
+              NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
+            else
+              echo "Error: Failed to create database"
+              cat /tmp/db-create.json
+              exit 1
+            fi
+          fi
+
+          if [ -z "$NEW_DB_ID" ] || [ "$NEW_DB_ID" = "null" ]; then
+            echo "Error: Failed to get valid database ID"
+            exit 1
           fi
 
           echo "new_db_name=$NEW_DB_NAME" >> $GITHUB_OUTPUT
           echo "new_db_id=$NEW_DB_ID" >> $GITHUB_OUTPUT
-          echo "Created database: $NEW_DB_NAME ($NEW_DB_ID)"
+          echo "Database ready: $NEW_DB_NAME ($NEW_DB_ID)"
 
       - name: Download divisions area data
         run: |
@@ -278,6 +373,25 @@ jobs:
             --table divisions_reverse \
             --mode rebuild
 
+      - name: Validate export files exist
+        run: |
+          echo "Validating export files..."
+
+          for schema_file in schema-base.sql schema-indexes.sql; do
+            if [ ! -f "exports/divisions-reverse/$schema_file" ]; then
+              echo "Error: Missing required file exports/divisions-reverse/$schema_file"
+              exit 1
+            fi
+            echo "  Found: $schema_file"
+          done
+
+          DATA_FILES=$(ls exports/divisions-reverse/data-*.sql 2>/dev/null | wc -l)
+          if [ "$DATA_FILES" -eq 0 ]; then
+            echo "Error: No data files found in exports/divisions-reverse/"
+            exit 1
+          fi
+          echo "  Found: $DATA_FILES data chunk(s)"
+
       - name: Apply base schema
         run: |
           echo "Phase 1: Creating tables..."
@@ -288,12 +402,17 @@ jobs:
       - name: Load data chunks
         run: |
           echo "Phase 2: Loading data..."
+          CHUNK_COUNT=0
           for chunk in exports/divisions-reverse/data-*.sql; do
-            echo "  Loading $chunk..."
-            npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
-              --remote \
-              --file="$chunk"
+            if [ -f "$chunk" ]; then
+              echo "  Loading $chunk..."
+              npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+                --remote \
+                --file="$chunk"
+              CHUNK_COUNT=$((CHUNK_COUNT + 1))
+            fi
           done
+          echo "Loaded $CHUNK_COUNT data chunks"
 
       - name: Create indexes
         run: |
@@ -302,35 +421,43 @@ jobs:
             --remote \
             --file=exports/divisions-reverse/schema-indexes.sql
 
-      - name: Verify new database
+      - name: Validate new database
+        id: validate
         run: |
-          echo "Verifying new database..."
-          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+          echo "Validating new database before deployment..."
+
+          RESULT=$(npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
             --remote \
-            --command "SELECT COUNT(*) as count FROM divisions_reverse" --json
+            --command "SELECT COUNT(*) as count FROM divisions_reverse" --json)
+          ROW_COUNT=$(echo "$RESULT" | jq -r '.[0].results[0].count')
+          echo "Row count: $ROW_COUNT"
+
+          if [ "$ROW_COUNT" -lt 1000 ]; then
+            echo "Error: Database has fewer than 1000 rows ($ROW_COUNT). Something went wrong."
+            exit 1
+          fi
+
+          # Test a bbox query to verify indexes work
+          BBOX_RESULT=$(npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT COUNT(*) as count FROM divisions_reverse WHERE bbox_xmin <= -71.0 AND bbox_xmax >= -71.0 AND bbox_ymin <= 42.3 AND bbox_ymax >= 42.3" --json)
+          BBOX_COUNT=$(echo "$BBOX_RESULT" | jq -r '.[0].results[0].count')
+          echo "Bbox query test (Boston area): $BBOX_COUNT matches"
+
+          echo "row_count=$ROW_COUNT" >> $GITHUB_OUTPUT
+          echo "Validation passed!"
 
       - name: Update wrangler.toml
         run: |
           echo "Updating wrangler.toml with new database binding..."
+          python scripts/update_wrangler_binding.py \
+            DB_DIVISIONS_REVERSE \
+            "${{ steps.new_db.outputs.new_db_name }}" \
+            "${{ steps.new_db.outputs.new_db_id }}"
 
-          sed -i 's/database_name = "geocoder-divisions-reverse[^"]*"/database_name = "${{ steps.new_db.outputs.new_db_name }}"/' wrangler.toml
-
-          python3 << 'EOF'
-          import re
-
-          with open('wrangler.toml', 'r') as f:
-              content = f.read()
-
-          pattern = r'(binding = "DB_DIVISIONS_REVERSE"\ndatabase_name = "[^"]*"\n)database_id = "[^"]*"'
-          replacement = r'\1database_id = "${{ steps.new_db.outputs.new_db_id }}"'
-          content = re.sub(pattern, replacement, content)
-
-          with open('wrangler.toml', 'w') as f:
-              f.write(content)
-          EOF
-
+          echo ""
           echo "Updated wrangler.toml:"
-          grep -A3 'DB_DIVISIONS_REVERSE' wrangler.toml
+          cat wrangler.toml
 
       - name: Deploy worker with new binding
         run: |
@@ -342,14 +469,21 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add wrangler.toml
-          git commit -m "chore: switch reverse geocoding to ${{ steps.new_db.outputs.new_db_name }}"
+          git commit -m "chore: switch reverse geocoding to ${{ steps.new_db.outputs.new_db_name }}
+
+          Database rebuild summary:
+          - Rows: ${{ steps.validate.outputs.row_count }}
+          - Old DB: ${{ steps.current_db.outputs.old_db_name }}
+          - New DB: ${{ steps.new_db.outputs.new_db_name }}"
           git push
 
       - name: Delete old database
         if: inputs.delete_old_db == true
         run: |
           echo "Deleting old database: ${{ steps.current_db.outputs.old_db_name }}"
-          npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation || true
+          if ! npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation; then
+            echo "Warning: Failed to delete old database. You may need to delete it manually."
+          fi
 
       - name: Summary
         run: |
@@ -359,6 +493,7 @@ jobs:
           echo "=========================================="
           echo "Old database: ${{ steps.current_db.outputs.old_db_name }}"
           echo "New database: ${{ steps.new_db.outputs.new_db_name }}"
+          echo "Row count: ${{ steps.validate.outputs.row_count }}"
           echo ""
           if [ "${{ inputs.delete_old_db }}" != "true" ]; then
             echo "Old database was kept. To delete it manually:"

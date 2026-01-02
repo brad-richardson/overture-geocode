@@ -134,7 +134,7 @@ ON CONFLICT(gers_id) DO UPDATE SET
 
 ### 3. GitHub Actions: DB Swap Workflow
 
-New workflow: `.github/workflows/rebuild-with-swap.yml`
+New workflow: `.github/workflows/rebuild-db-swap.yml`
 
 ```yaml
 name: Rebuild Database (DB Swap)
@@ -245,7 +245,7 @@ ON CONFLICT(gers_id) DO UPDATE SET
 |------|---------|
 | `scripts/export_to_sql.py` | Add `--mode` flag, split schema generation into phases |
 | `scripts/diff_and_update.py` | Change to proper `ON CONFLICT` UPSERT |
-| `.github/workflows/rebuild-with-swap.yml` | **New** - DB swap workflow |
+| `.github/workflows/rebuild-db-swap.yml` | **New** - DB swap workflow |
 | `.github/workflows/data-update.yml` | Minor: use incremental mode |
 | `.github/workflows/schema-apply-*.yml` | **Remove** or deprecate |
 

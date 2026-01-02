@@ -37,6 +37,14 @@ def get_divisions_base_schema() -> str:
     """Return base table schema (no indexes, no FTS) for bulk loading."""
     return """-- Divisions base schema for D1 (Phase 1: Tables only)
 -- Apply this first, then bulk load data, then apply indexes and FTS
+--
+-- Note on rowid: We define 'rowid INTEGER PRIMARY KEY' which is an alias for
+-- SQLite's internal rowid. When INSERTing without specifying rowid, SQLite
+-- auto-assigns sequential integers. The FTS5 external content table uses
+-- content_rowid=rowid to reference these. This works correctly because:
+-- 1. Bulk INSERT auto-assigns rowids
+-- 2. FTS 'rebuild' command reads content table using those rowids
+-- 3. Triggers access new.rowid/old.rowid which are always available
 
 DROP TABLE IF EXISTS divisions_fts;
 DROP TRIGGER IF EXISTS divisions_ai;
@@ -51,7 +59,7 @@ CREATE TABLE metadata (
 );
 
 CREATE TABLE divisions (
-    rowid INTEGER PRIMARY KEY,
+    rowid INTEGER PRIMARY KEY,  -- Auto-assigned; used by FTS content_rowid
     gers_id TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 0,
     type TEXT NOT NULL,
