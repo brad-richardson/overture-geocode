@@ -83,7 +83,7 @@ const addresses = await geocoder.getNearbyAddresses(42.3588336, -71.0578303, {
 
 ```typescript
 const geocoder = new OvertureGeocoder({
-  baseUrl: 'https://overture-geocoder.bradr.workers.dev', // default
+  baseUrl: 'https://geocoder.bradr.dev', // default
   timeout: 30000, // ms
   retries: 3,
   retryDelay: 1000, // ms

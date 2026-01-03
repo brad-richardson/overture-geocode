@@ -7,28 +7,23 @@ on:
   workflow_call:
 
 jobs:
-  worker:
-    name: Worker (Root Project)
+  rust:
+    name: Rust (Crates)
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run type check
-        run: npx tsc
-
+          components: rustfmt, clippy
+      - name: Run fmt
+        working-directory: crates
+        run: cargo fmt --all -- --check
+      - name: Run clippy
+        working-directory: crates
+        run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Run tests
-        run: npm run test
+        working-directory: crates
+        run: cargo test
 
   js-client:
     name: JS Client

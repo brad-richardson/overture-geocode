@@ -39,8 +39,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/bradrichardson/overture-geocode"
-Repository = "https://github.com/bradrichardson/overture-geocode"
+Homepage = "https://github.com/brad-richardson/overture-geocoder"
+Repository = "https://github.com/brad-richardson/overture-geocoder"
 
 [tool.hatch.build.targets.wheel]
 packages = ["overture_geocoder"]
