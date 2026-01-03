@@ -689,7 +689,7 @@
             'source-layer': 'division',
             filter: ['in', ['get', 'subtype'], ['literal', ['locality', 'county', 'region']]],
             layout: {
-              'text-field': ['coalesce', ['get', 'primary_name'], ['get', 'name']],
+              'text-field': ['get', '@name'],
               'text-size': [
                 'interpolate', ['linear'], ['zoom'],
                 5, 10,
