@@ -29,12 +29,28 @@ Output:
 import argparse
 import json
 import hashlib
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+
+# Validation patterns
+COUNTRY_CODE_PATTERN = re.compile(r'^[A-Z]{2}$')
+
+def validate_country_code(code: str) -> str:
+    """Validate and return a country code, or raise ValueError."""
+    if not COUNTRY_CODE_PATTERN.match(code):
+        raise ValueError(f"Invalid country code: {code!r} (must be 2 uppercase letters)")
+    return code
+
+def validate_population_threshold(threshold: int) -> int:
+    """Validate population threshold is a reasonable positive integer."""
+    if not isinstance(threshold, int) or threshold < 0 or threshold > 10_000_000_000:
+        raise ValueError(f"Invalid population threshold: {threshold}")
+    return threshold
 
 # Default paths
 EXPORTS_DIR = Path("exports")
@@ -52,10 +68,11 @@ def get_version() -> str:
 
 def get_countries(parquet_path: Path) -> list[str]:
     """Get list of unique country codes from parquet file."""
+    parquet_str = str(parquet_path.resolve())
     con = duckdb.connect()
     result = con.execute(f"""
         SELECT DISTINCT country
-        FROM read_parquet('{parquet_path}')
+        FROM read_parquet('{parquet_str}')
         WHERE country IS NOT NULL
         ORDER BY country
     """).fetchall()
@@ -127,6 +144,10 @@ def build_country_shard(
     version: str,
 ) -> dict:
     """Build SQLite shard for a single country."""
+    # Validate inputs to prevent SQL injection
+    country_code = validate_country_code(country_code)
+    parquet_str = str(parquet_path.resolve())
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if output_path.exists():
@@ -138,6 +159,7 @@ def build_country_shard(
     build_shard_schema(db)
 
     # Query divisions for this country
+    # Note: DuckDB requires file paths in the query string, but country_code is validated above
     cursor = con.execute(f"""
         SELECT
             gers_id,
@@ -154,43 +176,35 @@ def build_country_shard(
             country,
             region,
             search_text
-        FROM read_parquet('{parquet_path}')
+        FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
     """)
 
-    # Batch insert
-    batch = []
+    # Stream rows in chunks to avoid loading entire dataset into memory
     count = 0
     bbox = [180.0, 90.0, -180.0, -90.0]  # [min_lon, min_lat, max_lon, max_lat]
+    FETCH_SIZE = 50000
 
-    for row in cursor.fetchall():
-        batch.append(row)
-        # Update bbox
-        bbox[0] = min(bbox[0], row[6])  # bbox_xmin
-        bbox[1] = min(bbox[1], row[7])  # bbox_ymin
-        bbox[2] = max(bbox[2], row[8])  # bbox_xmax
-        bbox[3] = max(bbox[3], row[9])  # bbox_ymax
+    while True:
+        rows = cursor.fetchmany(FETCH_SIZE)
+        if not rows:
+            break
 
-        if len(batch) >= 50000:
-            db.executemany("""
-                INSERT INTO divisions (
-                    gers_id, version, type, primary_name, lat, lon,
-                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                    population, country, region, search_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, batch)
-            count += len(batch)
-            batch = []
+        # Update bbox from this batch
+        for row in rows:
+            bbox[0] = min(bbox[0], row[6])  # bbox_xmin
+            bbox[1] = min(bbox[1], row[7])  # bbox_ymin
+            bbox[2] = max(bbox[2], row[8])  # bbox_xmax
+            bbox[3] = max(bbox[3], row[9])  # bbox_ymax
 
-    if batch:
         db.executemany("""
             INSERT INTO divisions (
                 gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, batch)
-        count += len(batch)
+        """, rows)
+        count += len(rows)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -220,6 +234,10 @@ def build_head_shard(
     population_threshold: int = DEFAULT_HEAD_THRESHOLD,
 ) -> dict:
     """Build HEAD shard with countries, regions, and large cities."""
+    # Validate inputs
+    population_threshold = validate_population_threshold(population_threshold)
+    parquet_str = str(parquet_path.resolve())
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if output_path.exists():
@@ -236,6 +254,7 @@ def build_head_shard(
 
     # For now, just include high-population localities from the existing parquet
     # TODO: Add countries and regions from a separate query
+    # Note: population_threshold is validated as integer above
     cursor = con.execute(f"""
         SELECT
             gers_id,
@@ -252,37 +271,28 @@ def build_head_shard(
             country,
             region,
             search_text
-        FROM read_parquet('{parquet_path}')
+        FROM read_parquet('{parquet_str}')
         WHERE population >= {population_threshold}
            OR subtype IN ('county')
     """)
 
-    batch = []
+    # Stream rows in chunks to avoid loading entire dataset into memory
     count = 0
+    FETCH_SIZE = 50000
 
-    for row in cursor.fetchall():
-        batch.append(row)
+    while True:
+        rows = cursor.fetchmany(FETCH_SIZE)
+        if not rows:
+            break
 
-        if len(batch) >= 50000:
-            db.executemany("""
-                INSERT INTO divisions (
-                    gers_id, version, type, primary_name, lat, lon,
-                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                    population, country, region, search_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, batch)
-            count += len(batch)
-            batch = []
-
-    if batch:
         db.executemany("""
             INSERT INTO divisions (
                 gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, batch)
-        count += len(batch)
+        """, rows)
+        count += len(rows)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))

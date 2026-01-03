@@ -71,14 +71,23 @@ fn cmd_search(args: &[String]) -> Result<()> {
         match args[i].as_str() {
             "--db" => {
                 i += 1;
+                if i >= args.len() {
+                    bail!("--db requires a path argument");
+                }
                 db_path = PathBuf::from(&args[i]);
             }
             "--limit" => {
                 i += 1;
+                if i >= args.len() {
+                    bail!("--limit requires a number argument");
+                }
                 limit = args[i].parse().context("Invalid limit")?;
             }
             "--country" => {
                 i += 1;
+                if i >= args.len() {
+                    bail!("--country requires a country code argument");
+                }
                 country = Some(args[i].clone());
             }
             "--no-autocomplete" => {
@@ -156,6 +165,9 @@ fn cmd_count(args: &[String]) -> Result<()> {
         match args[i].as_str() {
             "--db" => {
                 i += 1;
+                if i >= args.len() {
+                    bail!("--db requires a path argument");
+                }
                 db_path = PathBuf::from(&args[i]);
             }
             other => bail!("Unknown option: {}", other),

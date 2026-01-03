@@ -13,6 +13,16 @@ use crate::types::{DivisionRow, GeocoderQuery, GeocoderResult};
 /// A SQLite database connection for geocoding queries.
 pub struct Database {
     conn: Connection,
+    /// Temp file path to clean up on drop (only used by `from_bytes`).
+    temp_file: Option<std::path::PathBuf>,
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        if let Some(path) = &self.temp_file {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 impl Database {
@@ -30,25 +40,38 @@ impl Database {
              PRAGMA temp_store = MEMORY;",
         )?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            temp_file: None,
+        })
     }
 
     /// Open a database from bytes (for WASM compatibility testing).
     ///
     /// Note: In actual WASM, we use sqlite3_deserialize instead.
-    /// This method creates a temp file for native testing.
+    /// This method creates a temp file for native testing, which is automatically
+    /// cleaned up when the Database is dropped.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
-
-        // Use SQLite's deserialize to load the database
-        // This requires the database to be in SQLite format
-        conn.execute_batch("PRAGMA page_size = 4096;")?;
-
-        // For testing, we write to a temp file
+        // Write bytes to a temp file (cleaned up on Drop)
         let temp_path = std::env::temp_dir().join(format!("geocoder-{}.db", uuid_v4()));
         std::fs::write(&temp_path, bytes)?;
 
-        Self::open(&temp_path)
+        let conn = Connection::open_with_flags(
+            &temp_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+
+        // Configure for read-only performance
+        conn.execute_batch(
+            "PRAGMA cache_size = -64000; -- 64MB
+             PRAGMA mmap_size = 268435456; -- 256MB
+             PRAGMA temp_store = MEMORY;",
+        )?;
+
+        Ok(Self {
+            conn,
+            temp_file: Some(temp_path),
+        })
     }
 
     /// Search for divisions matching the query.
@@ -88,9 +111,12 @@ impl Database {
             })
         })?;
 
-        // Collect and re-sort by boosted score (population boost affects ordering)
-        let mut results: Vec<GeocoderResult> = rows
-            .filter_map(|r| r.ok())
+        // Collect rows, propagating any SQLite errors instead of silently dropping them
+        let division_rows: Vec<DivisionRow> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        // Convert to results and re-sort by boosted score (population boost affects ordering)
+        let mut results: Vec<GeocoderResult> = division_rows
+            .into_iter()
             .map(|row| row.into_result())
             .collect();
 

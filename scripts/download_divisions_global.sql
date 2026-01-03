@@ -4,7 +4,10 @@
 -- Output: exports/divisions-global.parquet
 -- Expected: ~4.3M records
 --
--- Note: __OVERTURE_RELEASE__ is substituted at runtime with the latest release
+-- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
+-- The download_divisions.sh script fetches the latest release version from the
+-- Overture STAC catalog and replaces this placeholder via sed before execution.
+-- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
 --
 -- TODO: Future iteration - download raw data first, then filter/transform in a
 -- separate step. This would avoid re-downloading when tweaking search_text logic.

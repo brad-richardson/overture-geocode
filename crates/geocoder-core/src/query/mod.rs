@@ -8,6 +8,20 @@ pub use bias::apply_location_bias;
 pub use fts::prepare_fts_query;
 pub use merge::merge_results;
 
+// =============================================================================
+// Scoring constants
+// =============================================================================
+
+/// Multiplier for the natural log of population in boosted score calculation.
+/// Higher values increase the ranking advantage of high-population places.
+/// With 2.0, a city with 1M population gets ~27.6 points of boost (ln(1M) * 2.0).
+pub const POPULATION_BOOST_MULTIPLIER: f64 = 2.0;
+
+/// Penalty applied to places with no population data.
+/// This gives a slight advantage to places with known population over unknowns.
+/// Set to match the boost a place with population=1 would receive (ln(2) * 2.0 ≈ 1.4).
+pub const MISSING_POPULATION_PENALTY: f64 = 2.0;
+
 /// SQL query for searching divisions.
 /// Note: BM25 scoring and population boost are computed in Rust for portability.
 pub const SEARCH_DIVISIONS_SQL: &str = r#"
@@ -37,8 +51,10 @@ pub const SEARCH_DIVISIONS_SQL: &str = r#"
 /// Lower score = better match.
 pub fn calculate_boosted_score(bm25_score: f64, population: Option<i64>) -> f64 {
     match population {
-        Some(pop) if pop > 0 => bm25_score - ((pop as f64 + 1.0).ln() * 2.0),
-        _ => bm25_score - 2.0,
+        Some(pop) if pop > 0 => {
+            bm25_score - ((pop as f64 + 1.0).ln() * POPULATION_BOOST_MULTIPLIER)
+        }
+        _ => bm25_score - MISSING_POPULATION_PENALTY,
     }
 }
 

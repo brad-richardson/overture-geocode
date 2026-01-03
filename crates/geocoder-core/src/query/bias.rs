@@ -4,6 +4,27 @@
 
 use crate::types::{GeocoderResult, LocationBias};
 
+// =============================================================================
+// Bias constants
+// =============================================================================
+
+/// Importance boost for results in the same country (country-only bias).
+/// Applied when using `LocationBias::Country`.
+const COUNTRY_ONLY_BOOST: f64 = 0.15;
+
+/// Importance boost for results in the same country (combined with coordinates).
+/// Lower than `COUNTRY_ONLY_BOOST` since distance also contributes.
+const COUNTRY_WITH_COORDS_BOOST: f64 = 0.1;
+
+/// Maximum importance boost from proximity.
+/// Applied to results at the exact bias coordinates.
+const MAX_DISTANCE_BOOST: f64 = 0.1;
+
+/// Distance decay reference in kilometers.
+/// Results within this distance receive significant proximity boost.
+/// The boost halves at this distance from the bias point.
+const DISTANCE_DECAY_REFERENCE_KM: f64 = 100.0;
+
 /// Apply location bias to search results.
 ///
 /// Boosts results near the user's location (from country code or coordinates).
@@ -34,7 +55,7 @@ fn calculate_bias_boost(result: &GeocoderResult, bias: &LocationBias) -> f64 {
         LocationBias::Country(code) => {
             // Boost if result is in the same country
             if result.country.as_deref() == Some(code) {
-                0.15
+                COUNTRY_ONLY_BOOST
             } else {
                 0.0
             }
@@ -49,7 +70,7 @@ fn calculate_bias_boost(result: &GeocoderResult, bias: &LocationBias) -> f64 {
         LocationBias::Full { country, lat, lon } => {
             // Combine country boost with distance decay
             let country_boost = if result.country.as_deref() == Some(country) {
-                0.1
+                COUNTRY_WITH_COORDS_BOOST
             } else {
                 0.0
             };
@@ -63,11 +84,11 @@ fn calculate_bias_boost(result: &GeocoderResult, bias: &LocationBias) -> f64 {
 
 /// Calculate distance decay boost.
 ///
-/// Results within 100km get significant boost, decaying with distance.
+/// Results within `DISTANCE_DECAY_REFERENCE_KM` get significant boost, decaying with distance.
 fn distance_decay(distance_km: f64) -> f64 {
     // Decay factor: closer = higher boost
-    // Results within ~100km get most of the boost
-    0.1 / (1.0 + distance_km / 100.0)
+    // Results within DISTANCE_DECAY_REFERENCE_KM get most of the boost
+    MAX_DISTANCE_BOOST / (1.0 + distance_km / DISTANCE_DECAY_REFERENCE_KM)
 }
 
 /// Calculate the haversine distance between two points in kilometers.
