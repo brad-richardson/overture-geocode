@@ -1,129 +1,143 @@
 # Overture Geocoder
 
-A forward and reverse geocoder built on [Overture Maps](https://overturemaps.org/) data with minimal infrastructure costs.
+A high-performance forward and reverse geocoder built on [Overture Maps](https://overturemaps.org/) data, powered by **Rust**, **Cloudflare Workers**, and **R2**.
 
 ## Features
 
-- **Forward geocoding**: Search addresses and divisions by free-form text query
-- **Reverse geocoding**: Find divisions containing a coordinate (localities, neighborhoods, counties)
-- **Global divisions**: 450K+ cities, neighborhoods, and administrative areas worldwide
-- **Autocomplete**: Prefix matching enabled by default for type-ahead search
-- **Minimal storage**: SQLite with FTS5 indexes (~50MB globally)
-- **On-demand geometry**: Full Overture polygons fetched via GERS ID
-- **Zero egress costs**: Client-side DuckDB queries Overture S3 directly
+- **Global Coverage**: 450K+ cities, neighborhoods, and administrative areas worldwide.
+- **Serverless Architecture**: Runs entirely on Cloudflare Workers with zero persistent server management.
+- **Cost-Effective**: Uses SQLite shards stored in R2 to bypass database storage limits and minimize costs.
+- **Fast Search**: Full-Text Search (FTS5) with prefix matching for autocomplete.
+- **Reverse Geocoding**: Efficient point-in-polygon checks using bounding box indexes and hierarchical resolution.
+- **Zero Egress**: Client-side libraries can fetch full geometry directly from Overture's S3 buckets.
 
 ## API
 
+Base URL: `https://geocoder.bradr.dev`
+
 ### Forward Geocoding (Search)
 
+**Endpoint:** `GET /search`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `q` | string | required | Search query (e.g., "Boston", "New York") |
+| `limit` | int | 10 | Max results to return (1-40) |
+| `autocomplete` | bool | true | Enable prefix matching for the last token |
+| `format` | string | json | Response format: `json` or `geojson` |
+
+**Example:**
 ```bash
-# Search for places
-curl "https://overture-geocoder.bradr.workers.dev/search?q=boston"
+curl "https://geocoder.bradr.dev/search?q=boston&limit=1"
+```
 
-# With autocomplete (default: enabled)
-curl "https://overture-geocoder.bradr.workers.dev/search?q=bost"
-
-# Disable autocomplete for exact matching
-curl "https://overture-geocoder.bradr.workers.dev/search?q=boston&autocomplete=0"
+**Response:**
+```json
+{
+  "results": [
+    {
+      "gers_id": "...",
+      "name": "Boston",
+      "type": "locality",
+      "lat": 42.3601,
+      "lon": -71.0589,
+      "bbox": [ ... ],
+      "importance": 0.85,
+      "country": "US",
+      "region": "US-MA"
+    }
+  ]
+}
 ```
 
 ### Reverse Geocoding
 
+**Endpoint:** `GET /reverse`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `lat` | float | required | Latitude (-90 to 90) |
+| `lon` | float | required | Longitude (-180 to 180) |
+| `format` | string | json | Response format: `json` or `geojson` |
+
+**Example:**
 ```bash
-# Find divisions containing a point
-curl "https://overture-geocoder.bradr.workers.dev/reverse?lat=42.3601&lon=-71.0589"
+curl "https://geocoder.bradr.dev/reverse?lat=42.3601&lon=-71.0589"
 ```
-
-Response includes divisions sorted by specificity (most specific first), with hierarchy information showing containment relationships.
-
-## Quick Start
-
-### Python
-
-```python
-from overture_geocoder import OvertureGeocoder
-
-geocoder = OvertureGeocoder()
-
-# Forward geocoding
-results = geocoder.search("boston")
-print(results[0].primary_name)  # "Boston, MA"
-
-# Reverse geocoding
-divisions = geocoder.reverse(42.3601, -71.0589)
-for div in divisions:
-    print(f"{div.subtype}: {div.primary_name}")
-
-# Get full geometry (queries Overture S3 directly)
-geometry = geocoder.get_geometry(results[0].gers_id)
-```
-
-### JavaScript/TypeScript
-
-```typescript
-import { OvertureGeocoder } from 'overture-geocoder';
-
-const geocoder = new OvertureGeocoder();
-
-// Forward geocoding
-const results = await geocoder.search("boston");
-console.log(results[0].primary_name);
-
-// Reverse geocoding
-const divisions = await geocoder.reverse(42.3601, -71.0589);
-
-// Get full geometry (uses DuckDB-WASM)
-const geometry = await geocoder.getFullGeometry(results[0].gers_id);
-```
-
-## Deployment
-
-### Manual Triggers
-
-Two workflows are available for manual triggers:
-
-**Deploy Workflow** (incremental, zero-downtime):
-
-| Input | Description |
-|-------|-------------|
-| `force_all_upserts` | Force ALL records to be upserted (for logic/FTS changes) |
-
-Use this when you've changed search ranking, FTS text generation, or other logic that affects existing records. The service remains available throughout.
-
-**Schema Rebuild Workflow** (destructive, causes downtime):
-
-| Input | Description |
-|-------|-------------|
-| `database` | Which database to rebuild (forward, reverse, or both) |
-| `confirm` | Type "REBUILD" to confirm the destructive operation |
-
-Use this only when schema changes are required (adding/removing columns, changing indexes). The service will be unavailable during rebuild (1-2 hours for full dataset).
 
 ## Architecture
 
+This project uses a **sharded architecture** to handle global datasets within the constraints of serverless edge computing.
+
+1.  **Data Ingestion**:
+    *   `scripts/download_divisions.sh` uses **DuckDB** to extract division data from Overture Maps' S3 buckets (Parquet format).
+2.  **Shard Generation**:
+    *   `scripts/build_shards.py` partitions the data (e.g., by country or region) into optimized **SQLite databases**.
+    *   Each shard contains an FTS5 index for search and spatial indexes for reverse geocoding.
+3.  **Storage**:
+    *   Shards are uploaded to **Cloudflare R2** (`geocoder-shards` bucket).
+4.  **Runtime**:
+    *   The **Rust Worker** (`crates/geocoder-worker`) handles requests.
+    *   It dynamically fetches the required SQLite shard from R2, caches it, and queries it using the native SQLite API in Cloudflare Workers.
+
+```mermaid
+graph LR
+    User[Client] --> Worker[Rust Worker]
+    Worker --> R2[R2 Bucket]
+    R2 --> Shard[SQLite Shard]
+    Worker --> Shard
 ```
-Client (Python/JS)
-    │
-    ├── /search ──────► Cloudflare Worker ──► D1 (FTS5 Index)
-    │
-    ├── /reverse ─────► Cloudflare Worker ──► D1 (Divisions Reverse Index)
-    │
-    └── getGeometry() ──► DuckDB ──► Overture S3 (free egress)
+
+## Development
+
+### Prerequisites
+
+*   Rust (latest stable)
+*   Node.js & npm
+*   Cloudflare Wrangler (`npm install -g wrangler`)
+*   DuckDB (for data scripts)
+
+### Setup
+
+1.  **Install Dependencies:**
+    ```bash
+    cargo install worker-build
+    pip install duckdb
+    ```
+
+2.  **Build & Run Worker:**
+    ```bash
+    cd crates/geocoder-worker
+    wrangler dev
+    ```
+
+3.  **Generate Local Test Data:**
+    ```bash
+    # Downloads MA data and builds a local shard for testing
+    ./scripts/setup-local-db.sh
+    ```
+
+### Deployment
+
+Deploy the worker to Cloudflare:
+
+```bash
+cd crates/geocoder-worker
+wrangler deploy
 ```
 
-## Data
+## GitHub Actions
 
-Uses [Overture Maps](https://overturemaps.org/) division data:
-- 450K+ global divisions (localities, neighborhoods, counties, regions)
-- GERS IDs for stable entity references
-- Monthly releases with differential updates
+### `Deploy Rust Worker`
+Automatically deploys the worker to Cloudflare on pushes to `main` affecting `crates/`.
 
-## Cost Estimates
-
-| Scale | Storage | Monthly Cost |
-|-------|---------|--------------|
-| Global divisions | ~50MB | $0 (Cloudflare free tier) |
-| Global + addresses | ~15GB | $5-20 (D1 paid tier) |
+### `Rebuild R2 Shards`
+A scheduled workflow (monthly) that updates the data from the latest Overture release.
+*   **Manual Trigger**: You can manually run this workflow to rebuild specific shards.
+*   **Inputs**:
+    *   `countries`: Comma-separated list (e.g., `US,CA`) to limit the build.
+    *   `build_type`: `forward`, `reverse`, or `both`.
+    *   `confirm`: Type `REBUILD` to confirm destructive updates (not required for scheduled runs).
 
 ## License
 
