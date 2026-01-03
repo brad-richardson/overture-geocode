@@ -3,12 +3,14 @@
   "version": "0.2.0",
   "description": "Forward geocoder using Overture Maps data with Nominatim-compatible API",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
@@ -17,7 +19,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "prepublishOnly": "npm run build",
     "test": "vitest",
     "test:ci": "vitest run",
@@ -49,10 +51,11 @@
     "access": "public"
   },
   "dependencies": {
-    "@bradrichardson/overturemaps": "^0.3.2"
+    "@bradrichardson/overturemaps": "^0.3.3"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.3.3",
     "vitest": "^1.0.0"
   }

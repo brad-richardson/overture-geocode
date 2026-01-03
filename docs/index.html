@@ -480,7 +480,9 @@
     <a href="https://github.com/brad-richardson/overture-geocoder" target="_blank">GitHub</a>
   </div>
 
-  <script>
+  <script type="module">
+    import { OvertureGeocoder } from 'https://esm.sh/@bradrichardson/overture-geocoder@0.2.0';
+
     // Configuration Constants
     const DEFAULT_API_URL = 'https://geocoder.bradr.dev';
     const SEARCH_LIMIT = 10;
@@ -493,6 +495,9 @@
     // Allow API URL override via query parameter
     const urlParams = new URLSearchParams(window.location.search);
     const API_BASE_URL = urlParams.get('api') || DEFAULT_API_URL;
+
+    // Initialize Client
+    const geocoder = new OvertureGeocoder({ baseUrl: API_BASE_URL });
 
     // PMTiles URLs from Overture Maps
     const PMTILES_SOURCES = {
@@ -724,6 +729,22 @@
     const reverseBtn = document.getElementById('reverse-btn');
     const resultsContainer = document.getElementById('results');
 
+    // Inject "Verify Geometry" toggle into reverse panel
+    const verifyToggleHtml = `
+      <div style="margin: 12px 0; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="verify-geometry" checked>
+        <label for="verify-geometry" style="font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer;">
+          Verify Point in Polygon
+        </label>
+      </div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.4); margin-bottom: 12px; margin-left: 20px;">
+        Fetches full geometry from Overture S3 to verify exact containment.
+      </div>
+    `;
+    const coordsHint = document.getElementById('coords-hint');
+    coordsHint.insertAdjacentHTML('afterend', verifyToggleHtml);
+    const verifyGeometryCheckbox = document.getElementById('verify-geometry');
+
     // Update cursor style based on mode
     function updateCursor() {
       map.getCanvas().style.cursor = currentTab === 'reverse' ? 'crosshair' : '';
@@ -740,6 +761,7 @@
           forwardPanel.style.display = 'block';
           reversePanel.style.display = 'none';
         } else {
+          forwardPanel.style.display = 'block'; // Make sure panel logic handles display
           forwardPanel.style.display = 'none';
           reversePanel.style.display = 'block';
         }
@@ -756,24 +778,15 @@
       clearMarkers();
 
       try {
-        const params = new URLSearchParams({
-          q: query,
-          format: 'jsonv2',
-          limit: String(SEARCH_LIMIT)
+        const results = await geocoder.search(query, {
+          limit: SEARCH_LIMIT
         });
 
-        const response = await fetch(`${API_BASE_URL}/search?${params}`);
+        displayForwardResults(results);
 
-        if (!response.ok) {
-          throw new Error(getErrorMessage(response.status, 'search'));
-        }
-
-        const data = await response.json();
-        displayForwardResults(data);
-
-        if (data.length > 0) {
-          addMarkers(data);
-          fitBounds(data);
+        if (results.length > 0) {
+          addMarkers(results);
+          fitBounds(results);
         }
       } catch (error) {
         showError(error.message);
@@ -786,53 +799,33 @@
       clearMarkers();
 
       try {
-        const params = new URLSearchParams({
-          lat: String(lat),
-          lon: String(lon),
-          format: 'jsonv2'
+        const verify = verifyGeometryCheckbox.checked;
+        const results = await geocoder.reverse(lat, lon, {
+          verifyGeometry: verify
         });
 
-        const response = await fetch(`${API_BASE_URL}/reverse?${params}`);
-
-        if (!response.ok) {
-          throw new Error(getErrorMessage(response.status, 'reverse lookup'));
-        }
-
-        const data = await response.json();
-        displayReverseResults(data, lat, lon);
+        displayReverseResults(results, lat, lon);
 
         // Add marker for the searched location
         addClickMarker(lat, lon);
 
-        if (data.length > 0) {
+        if (results.length > 0) {
           // Zoom to show the results
           const bounds = new maplibregl.LngLatBounds();
           bounds.extend([lon, lat]);
-          data.forEach(r => {
-            bounds.extend([r.lon, r.lat]);
+          results.forEach(r => {
+            // Use boundingbox from result [minX, minY, maxX, maxY]
+            if (r.boundingbox) {
+                bounds.extend([r.boundingbox[0], r.boundingbox[1]]);
+                bounds.extend([r.boundingbox[2], r.boundingbox[3]]);
+            } else {
+                bounds.extend([r.lon, r.lat]);
+            }
           });
           map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
         }
       } catch (error) {
         showError(error.message);
-      }
-    }
-
-    // Get user-friendly error message
-    function getErrorMessage(status, action) {
-      switch (status) {
-        case 400:
-          return `Invalid ${action} request. Please check your input and try again.`;
-        case 404:
-          return `The ${action} service could not be found. Please try again later.`;
-        case 429:
-          return 'Too many requests. Please wait a moment and try again.';
-        case 500:
-        case 502:
-        case 503:
-          return `The ${action} service is temporarily unavailable. Please try again later.`;
-        default:
-          return `Unable to complete ${action} (error ${status}). Please try again.`;
       }
     }
 
@@ -891,11 +884,16 @@
       let html = '<div class="results-header">Location Hierarchy</div>';
 
       results.forEach((result, index) => {
+        const confidenceClass = result.confidence === 'exact' ? 'text-green-400' : 'text-yellow-400';
+        const confidenceLabel = result.confidence === 'exact' ? '✓ Verified' : '⚠ BBox Only';
+        const confidenceColor = result.confidence === 'exact' ? '#4ade80' : '#facc15';
+
         html += `
           <div class="result-item" data-index="${index}" data-lat="${result.lat}" data-lon="${result.lon}">
             <div class="result-name">${escapeHtml(result.primary_name)}</div>
             <div class="result-meta">
               <span class="result-type">${escapeHtml(result.subtype)}</span>
+              <span class="result-coords" style="color: ${confidenceColor}; font-weight: bold;">${confidenceLabel}</span>
               <span class="result-coords">${result.distance_km.toFixed(2)} km</span>
             </div>
             ${result.hierarchy ? `
@@ -999,7 +997,13 @@
 
       const bounds = new maplibregl.LngLatBounds();
       results.forEach(r => {
-        bounds.extend([r.lon, r.lat]);
+        // Use boundingbox from result [minX, minY, maxX, maxY] if available
+        if (r.boundingbox) {
+            bounds.extend([r.boundingbox[0], r.boundingbox[1]]);
+            bounds.extend([r.boundingbox[2], r.boundingbox[3]]);
+        } else {
+            bounds.extend([r.lon, r.lat]);
+        }
       });
 
       map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
