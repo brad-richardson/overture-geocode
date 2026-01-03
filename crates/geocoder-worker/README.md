@@ -4,39 +4,47 @@ Cloudflare Worker for Overture geocoding using R2-stored SQLite shards.
 
 ## Status
 
-**Work in Progress** - The worker structure is in place but SQLite WASM queries are not yet implemented.
+SQLite WASM queries are implemented using rusqlite 0.38+ which natively supports `wasm32-unknown-unknown`.
 
 ### Completed
 - Worker routing (`/search`, `/reverse`, `/health`, `/`)
 - STAC catalog loading from R2
 - Shard selection (HEAD + country based on CF-IPCountry)
 - R2 bucket integration
+- SQLite query execution via rusqlite WASM
+- Location bias (country-based from CF-IPCountry header)
 
 ### TODO
-- [ ] WASM SQLite query execution
 - [ ] Edge caching for catalog and shards
 - [ ] Reverse geocoding implementation
-
-## SQLite WASM Options
-
-The challenge is running SQLite queries in a Cloudflare Worker (WASM environment). Options being considered:
-
-1. **sql.js via JS interop**: Import sql.js and call from Rust
-2. **sqlite-wasm-rs**: Rust bindings for SQLite WASM
-3. **rusqlite WASM build**: Compile rusqlite for wasm32 target
+- [ ] Performance optimization for large shards
 
 ## Development
 
 ```bash
-# Check compilation
+# Check native compilation
 cargo check -p geocoder-worker
 
-# Build for WASM (requires worker-build)
+# Build for WASM (requires wasm32 target)
+rustup target add wasm32-unknown-unknown
+cargo build -p geocoder-worker --target wasm32-unknown-unknown
+
+# Run with wrangler (builds and serves locally)
 cd crates/geocoder-worker
 npx wrangler dev
 
 # Deploy
 npx wrangler deploy
+```
+
+## Testing
+
+```bash
+# Run native tests
+cargo test -p geocoder-worker
+
+# Run WASM tests (requires wasm-pack)
+wasm-pack test --node crates/geocoder-worker
 ```
 
 ## Prerequisites
@@ -59,6 +67,8 @@ Parameters:
 - `autocomplete`: Enable prefix matching (default: true)
 - `format`: `json` or `geojson` (default: json)
 
+Location bias is automatically applied based on the `CF-IPCountry` header.
+
 ### GET /reverse
 
 ```
@@ -70,3 +80,14 @@ Parameters:
 - `lon` (required): Longitude
 
 (Not yet implemented for R2 shards)
+
+## Architecture
+
+The worker:
+1. Fetches STAC catalog from R2 to discover available shards
+2. Selects HEAD shard (global high-population places) + country shard (if available)
+3. Fetches SQLite databases from R2
+4. Opens each database in-memory using rusqlite
+5. Executes FTS5 queries against each shard
+6. Merges, deduplicates, and applies location bias
+7. Returns results as JSON or GeoJSON

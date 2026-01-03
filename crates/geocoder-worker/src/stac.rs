@@ -1,6 +1,6 @@
 //! STAC catalog loading and shard management.
 
-use geocoder_core::{Database, GeocoderQuery, GeocoderResult};
+use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, GeocoderResult, LocationBias};
 use serde::Deserialize;
 use worker::*;
 
@@ -91,18 +91,23 @@ impl<'a> ShardLoader<'a> {
             }
         }
 
-        // Merge and deduplicate results
+        // Sort by importance before deduplication
         all_results.sort_by(|a, b| {
             b.importance
                 .partial_cmp(&a.importance)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Deduplicate by gers_id
+        // Deduplicate by gers_id (keep highest importance)
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|r| seen.insert(r.gers_id.clone()));
 
-        // Apply limit
+        // Apply location bias (can elevate results from country shard)
+        if !matches!(query.bias, LocationBias::None) {
+            apply_location_bias(&mut all_results, &query.bias);
+        }
+
+        // Truncate to requested limit after bias is applied
         all_results.truncate(query.limit);
 
         Ok(all_results)

@@ -10,7 +10,7 @@
 //! cargo test --test search_integration
 //! ```
 
-use geocoder_core::{Database, GeocoderQuery};
+use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, LocationBias};
 use std::path::Path;
 
 const US_SHARD_PATH: &str = "../../shards/2026-01-02.0/shards/US.db";
@@ -131,4 +131,50 @@ fn test_autocomplete() {
     // Should find Boston with prefix match
     let has_boston = results.iter().any(|r| r.primary_name.contains("Boston"));
     assert!(has_boston, "Autocomplete should find Boston for 'bost'");
+}
+
+#[test]
+fn test_location_bias_returns_many_results() {
+    let Some(db) = get_db() else {
+        eprintln!("Skipping: US shard not found");
+        return;
+    };
+
+    // Request limit=5, but search should return more for bias to work with
+    let query = GeocoderQuery::new("paris").with_limit(5);
+    let results = db.search(&query).unwrap();
+
+    // Database::search should return more than 5 results (up to 10x limit)
+    // This allows location bias to elevate results that wouldn't make the initial cut
+    assert!(
+        results.len() > 5,
+        "Search should return more than limit ({}) for bias to work with, got {}",
+        5,
+        results.len()
+    );
+}
+
+#[test]
+fn test_location_bias_us_elevates_us_results() {
+    let Some(db) = get_db() else {
+        eprintln!("Skipping: US shard not found");
+        return;
+    };
+
+    // Search for a common name that exists in multiple countries
+    let query = GeocoderQuery::new("springfield").with_limit(10);
+    let mut results = db.search(&query).unwrap();
+
+    // Apply US country bias
+    apply_location_bias(&mut results, &LocationBias::Country("US".to_string()));
+    results.truncate(10);
+
+    // After bias, US results should be ranked higher
+    let us_count_in_top_5 = results.iter().take(5).filter(|r| r.country.as_deref() == Some("US")).count();
+
+    assert!(
+        us_count_in_top_5 >= 3,
+        "With US bias, at least 3 of top 5 should be US results, got {}",
+        us_count_in_top_5
+    );
 }

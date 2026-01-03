@@ -75,6 +75,10 @@ impl Database {
     }
 
     /// Search for divisions matching the query.
+    ///
+    /// Returns up to `limit * 10` results (minimum 100) sorted by importance.
+    /// Callers should apply location bias and then truncate to the desired limit.
+    /// This allows bias to elevate results that wouldn't make the initial top N.
     pub fn search(&self, query: &GeocoderQuery) -> Result<Vec<GeocoderResult>> {
         let fts_query = prepare_fts_query(&query.text, query.autocomplete);
 
@@ -84,8 +88,8 @@ impl Database {
 
         let mut stmt = self.conn.prepare_cached(SEARCH_DIVISIONS_SQL)?;
 
-        // Fetch more results than requested, then re-rank by population boost.
-        // This ensures high-population places with lower BM25 scores still appear.
+        // Fetch more results than the final limit to allow bias to elevate
+        // results that wouldn't otherwise make the cut.
         let fetch_limit = (query.limit * 10).max(100);
 
         let rows = stmt.query_map([&fts_query, &fetch_limit.to_string()], |row| {
@@ -127,9 +131,7 @@ impl Database {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Truncate to requested limit
-        results.truncate(query.limit);
-
+        // Don't truncate here - let caller apply bias first, then truncate
         Ok(results)
     }
 
