@@ -16,6 +16,24 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return preflight_response();
     }
 
+    // Rate limiting: 60 requests per minute per IP
+    let ip = req
+        .headers()
+        .get("CF-Connecting-IP")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if let Ok(rate_limiter) = env.rate_limiter("RATE_LIMITER") {
+        if let Ok(outcome) = rate_limiter.limit(ip).await {
+            if !outcome.success {
+                let mut headers = cors_headers();
+                headers.set("Retry-After", "60").ok();
+                return Ok(Response::error("Rate limit exceeded", 429)?.with_headers(headers));
+            }
+        }
+    }
+
     let router = Router::new();
 
     let response = router

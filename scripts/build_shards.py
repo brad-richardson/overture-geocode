@@ -644,21 +644,24 @@ def generate_stac_item(
 def generate_stac_collection(
     version: str,
     shard_infos: dict[str, dict],
+    shard_hashes: dict[str, str],
+    shards_subdir: str = "shards",
 ) -> dict:
-    """Generate STAC Collection for all shards."""
+    """Generate STAC Collection for all shards with embedded items."""
     # Calculate overall bbox and temporal extent
     overall_bbox = [-180.0, -90.0, 180.0, 90.0]
     now = datetime.now(timezone.utc).isoformat()
 
-    item_links = [
-        {
-            "rel": "item",
-            "href": f"./items/{shard_id}.json",
-            "type": "application/geo+json",
-            "title": f"{shard_id} shard",
+    # Embed item metadata directly in collection (reduces R2 fetches)
+    items = {}
+    for shard_id, info in shard_infos.items():
+        items[shard_id] = {
+            "record_count": info["record_count"],
+            "size_bytes": info["size_bytes"],
+            "sha256": shard_hashes.get(shard_id, ""),
+            "href": f"./{shards_subdir}/{shard_id}.db",
+            "bbox": info["bbox"],
         }
-        for shard_id in sorted(shard_infos.keys())
-    ]
 
     return {
         "type": "Collection",
@@ -677,11 +680,11 @@ def generate_stac_collection(
             "total_records": sum(s["record_count"] for s in shard_infos.values()),
             "total_size_bytes": sum(s["size_bytes"] for s in shard_infos.values()),
         },
+        "items": items,  # Embedded item metadata
         "links": [
             {"rel": "root", "href": "../catalog.json", "type": "application/json"},
             {"rel": "parent", "href": "../catalog.json", "type": "application/json"},
             {"rel": "self", "href": "./collection.json", "type": "application/json"},
-            *item_links,
         ],
     }
 
@@ -766,15 +769,22 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
                   f"{info['record_count']:,} records, "
                   f"{info['size_bytes'] / 1024 / 1024:.1f} MB")
 
-    # Generate STAC items
-    print("\nGenerating STAC catalog...")
+    # Calculate hashes for all shards
+    print("\nCalculating shard hashes...")
+    shard_hashes = {}
+    for shard_id in shard_infos:
+        shard_path = shards_subdir / f"{shard_id}.db"
+        shard_hashes[shard_id] = hash_file(shard_path)
+
+    # Generate STAC items (for backward compatibility)
+    print("Generating STAC catalog...")
     for shard_id, info in shard_infos.items():
         shard_path = shards_subdir / f"{shard_id}.db"
         item = generate_stac_item(shard_id, info, shard_path, version)
         write_json(items_subdir / f"{shard_id}.json", item)
 
-    # Generate collection
-    collection = generate_stac_collection(version, shard_infos)
+    # Generate collection with embedded items
+    collection = generate_stac_collection(version, shard_infos, shard_hashes, "shards")
     write_json(version_dir / "collection.json", collection)
 
     return shard_infos
@@ -837,8 +847,15 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
                   f"{info['record_count']:,} records, "
                   f"{info['size_bytes'] / 1024 / 1024:.1f} MB")
 
-    # Generate STAC items for reverse shards
-    print("\nGenerating reverse STAC catalog...")
+    # Calculate hashes for all reverse shards
+    print("\nCalculating shard hashes...")
+    shard_hashes = {}
+    for shard_id in shard_infos:
+        shard_path = reverse_subdir / f"{shard_id}.db"
+        shard_hashes[shard_id] = hash_file(shard_path)
+
+    # Generate STAC items for reverse shards (for backward compatibility)
+    print("Generating reverse STAC catalog...")
     for shard_id, info in shard_infos.items():
         shard_path = reverse_subdir / f"{shard_id}.db"
         item = generate_stac_item(shard_id, info, shard_path, version)
@@ -847,19 +864,11 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
         item["assets"]["data"]["title"] = f"{shard_id} reverse geocoding shard"
         write_json(reverse_items_subdir / f"{shard_id}.json", item)
 
-    # Generate reverse collection
-    collection = generate_stac_collection(version, shard_infos)
+    # Generate reverse collection with embedded items
+    collection = generate_stac_collection(version, shard_infos, shard_hashes, "reverse")
     collection["id"] = f"geocoder-reverse-shards-{version}"
     collection["title"] = f"Overture Reverse Geocoder Shards {version}"
     collection["description"] = "Pre-built SQLite shards for reverse geocoding Overture Maps divisions data"
-    # Update item links
-    collection["links"] = [
-        link if link["rel"] != "item" else {
-            **link,
-            "href": f"./reverse-items/{link['href'].split('/')[-1]}"
-        }
-        for link in collection["links"]
-    ]
     write_json(version_dir / "reverse-collection.json", collection)
 
     return shard_infos
