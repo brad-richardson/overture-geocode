@@ -1,0 +1,18 @@
+{
+  "name": "geocoder-r2",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aspect-build/cloudflare-worker-sqlite-wasm": "^0.0.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -83,7 +83,7 @@ def get_countries(parquet_path: Path) -> list[str]:
 def build_shard_schema(db: sqlite3.Connection):
     """Create the shard schema with FTS5."""
     db.executescript("""
-        PRAGMA journal_mode=WAL;
+        PRAGMA journal_mode=DELETE;
         PRAGMA synchronous=NORMAL;
         PRAGMA cache_size=-64000;
 
@@ -213,9 +213,10 @@ def build_country_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
                (datetime.now(timezone.utc).isoformat(),))
 
-    # Optimize FTS
+    # Optimize FTS and compact database for WASM deserialize compatibility
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
     db.commit()
+    db.execute("VACUUM")
     db.close()
     con.close()
 
@@ -303,9 +304,10 @@ def build_head_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
                (datetime.now(timezone.utc).isoformat(),))
 
-    # Optimize FTS
+    # Optimize FTS and compact database for WASM deserialize compatibility
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
     db.commit()
+    db.execute("VACUUM")
     db.close()
     con.close()
 

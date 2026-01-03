@@ -36,14 +36,14 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 /// CORS headers applied to all responses.
 fn cors_headers() -> Headers {
-    let mut headers = Headers::new();
+    let headers = Headers::new();
     headers.set("Access-Control-Allow-Origin", "*").unwrap();
     headers
 }
 
 /// Response for CORS preflight (OPTIONS) requests.
 fn preflight_response() -> Result<Response> {
-    let mut headers = Headers::new();
+    let headers = Headers::new();
     headers.set("Access-Control-Allow-Origin", "*").unwrap();
     headers.set("Access-Control-Allow-Methods", "GET, OPTIONS").unwrap();
     headers.set("Access-Control-Allow-Headers", "Content-Type").unwrap();

@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Cloudflare Workers
-worker = "0.5"
+worker = "0.7"
 
 # Core geocoder with rusqlite (supports wasm32 in 0.38+)
 geocoder-core = { path = "../geocoder-core" }

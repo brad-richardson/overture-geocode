@@ -76,46 +76,24 @@ impl Database {
 
     /// Open a database from bytes (WASM version).
     ///
-    /// Uses SQLite's deserialize to load the database directly into memory
-    /// without filesystem access.
+    /// Uses rusqlite's deserialize API to load the database from bytes.
+    /// Note: The database must NOT be in WAL mode (use journal_mode=DELETE when building).
     #[cfg(target_arch = "wasm32")]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        use rusqlite::ffi;
-        use std::ffi::CString;
-        use std::ptr;
+        use rusqlite::MAIN_DB;
+        use std::io::Cursor;
 
-        // Open an in-memory database
-        let conn = Connection::open_in_memory()?;
+        // Open an in-memory database first
+        let mut conn = Connection::open_in_memory()?;
 
-        // Allocate SQLite memory and copy the bytes
-        let sz = bytes.len();
-        let ptr = unsafe { ffi::sqlite3_malloc64(sz as u64) as *mut u8 };
-        if ptr.is_null() {
-            return Err(crate::error::Error::Database("Failed to allocate SQLite memory".into()));
-        }
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, sz);
-        }
-
-        // Deserialize into the main database
-        let schema = CString::new("main").unwrap();
-        let rc = unsafe {
-            ffi::sqlite3_deserialize(
-                conn.handle(),
-                schema.as_ptr(),
-                ptr,
-                sz as i64,
-                sz as i64,
-                ffi::SQLITE_DESERIALIZE_FREEONCLOSE | ffi::SQLITE_DESERIALIZE_READONLY,
-            )
-        };
-
-        if rc != ffi::SQLITE_OK {
-            // Memory will be freed by SQLite due to FREEONCLOSE flag
-            return Err(crate::error::Error::Database(
-                format!("sqlite3_deserialize failed: {}", rc)
-            ));
-        }
+        // Deserialize the bytes into this connection
+        // This uses rusqlite's serialize feature which wraps sqlite3_deserialize
+        conn.deserialize_read_exact(
+            MAIN_DB,
+            Cursor::new(bytes),
+            bytes.len(),
+            true, // read_only
+        )?;
 
         // Configure for read-only performance
         conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
