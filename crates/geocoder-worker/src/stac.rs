@@ -301,10 +301,7 @@ impl<'a> ShardLoader<'a> {
             .collect();
 
         // Sort by distance (closest first) - ensures user's actual location is never excluded
-        candidates.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take closest shards up to limit
         candidates
@@ -319,11 +316,7 @@ impl<'a> ShardLoader<'a> {
         // Check if country is region-sharded
         if let Some(regions) = collection.region_sharded.get(country) {
             // Country is split into regions - load all of them (up to limit)
-            return regions
-                .iter()
-                .take(MAX_LOCATION_SHARDS)
-                .cloned()
-                .collect();
+            return regions.iter().take(MAX_LOCATION_SHARDS).cloned().collect();
         }
 
         // Country has a single shard
