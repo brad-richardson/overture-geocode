@@ -46,11 +46,11 @@ impl Database {
         })
     }
 
-    /// Open a database from bytes (for WASM compatibility testing).
+    /// Open a database from bytes.
     ///
-    /// Note: In actual WASM, we use sqlite3_deserialize instead.
-    /// This method creates a temp file for native testing, which is automatically
-    /// cleaned up when the Database is dropped.
+    /// On native: creates a temp file (cleaned up when dropped).
+    /// On WASM: uses SQLite's in-memory deserialize.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         // Write bytes to a temp file (cleaned up on Drop)
         let temp_path = std::env::temp_dir().join(format!("geocoder-{}.db", uuid_v4()));
@@ -74,7 +74,63 @@ impl Database {
         })
     }
 
+    /// Open a database from bytes (WASM version).
+    ///
+    /// Uses SQLite's deserialize to load the database directly into memory
+    /// without filesystem access.
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        use rusqlite::ffi;
+        use std::ffi::CString;
+        use std::ptr;
+
+        // Open an in-memory database
+        let conn = Connection::open_in_memory()?;
+
+        // Allocate SQLite memory and copy the bytes
+        let sz = bytes.len();
+        let ptr = unsafe { ffi::sqlite3_malloc64(sz as u64) as *mut u8 };
+        if ptr.is_null() {
+            return Err(crate::error::Error::Database("Failed to allocate SQLite memory".into()));
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, sz);
+        }
+
+        // Deserialize into the main database
+        let schema = CString::new("main").unwrap();
+        let rc = unsafe {
+            ffi::sqlite3_deserialize(
+                conn.handle(),
+                schema.as_ptr(),
+                ptr,
+                sz as i64,
+                sz as i64,
+                ffi::SQLITE_DESERIALIZE_FREEONCLOSE | ffi::SQLITE_DESERIALIZE_READONLY,
+            )
+        };
+
+        if rc != ffi::SQLITE_OK {
+            // Memory will be freed by SQLite due to FREEONCLOSE flag
+            return Err(crate::error::Error::Database(
+                format!("sqlite3_deserialize failed: {}", rc)
+            ));
+        }
+
+        // Configure for read-only performance
+        conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
+
+        Ok(Self {
+            conn,
+            temp_file: None,
+        })
+    }
+
     /// Search for divisions matching the query.
+    ///
+    /// Returns up to `limit * 10` results (minimum 100) sorted by importance.
+    /// Callers should apply location bias and then truncate to the desired limit.
+    /// This allows bias to elevate results that wouldn't make the initial top N.
     pub fn search(&self, query: &GeocoderQuery) -> Result<Vec<GeocoderResult>> {
         let fts_query = prepare_fts_query(&query.text, query.autocomplete);
 
@@ -84,8 +140,8 @@ impl Database {
 
         let mut stmt = self.conn.prepare_cached(SEARCH_DIVISIONS_SQL)?;
 
-        // Fetch more results than requested, then re-rank by population boost.
-        // This ensures high-population places with lower BM25 scores still appear.
+        // Fetch more results than the final limit to allow bias to elevate
+        // results that wouldn't otherwise make the cut.
         let fetch_limit = (query.limit * 10).max(100);
 
         let rows = stmt.query_map([&fts_query, &fetch_limit.to_string()], |row| {
@@ -127,18 +183,16 @@ impl Database {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Truncate to requested limit
-        results.truncate(query.limit);
-
+        // Don't truncate here - let caller apply bias first, then truncate
         Ok(results)
     }
 
     /// Get the number of records in the divisions table.
     pub fn count(&self) -> Result<u64> {
-        let count: u64 = self
+        let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM divisions", [], |row| row.get(0))?;
-        Ok(count)
+        Ok(count as u64)
     }
 
     /// Get metadata value by key.

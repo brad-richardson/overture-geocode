@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "geocoder-core",
     "geocoder-cli",
+    "geocoder-worker",
 ]
 
 [workspace.package]
@@ -20,8 +21,8 @@ serde_json = "1.0"
 thiserror = "2.0"
 anyhow = "1.0"
 
-# SQLite - native builds
-rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+# SQLite - supports both native and wasm32-unknown-unknown (0.38+)
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Async runtime (for CLI)
 tokio = { version = "1.0", features = ["full"] }

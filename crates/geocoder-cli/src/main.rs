@@ -116,13 +116,16 @@ fn cmd_search(args: &[String]) -> Result<()> {
         .with_autocomplete(autocomplete)
         .with_bias(bias.clone());
 
-    // Execute search
+    // Execute search (returns more results than limit to allow bias to elevate)
     let mut results = db.search(&query)?;
 
-    // Apply location bias
+    // Apply location bias (re-ranks results)
     if !matches!(bias, LocationBias::None) {
         geocoder_core::query::apply_location_bias(&mut results, &bias);
     }
+
+    // Truncate to requested limit after bias is applied
+    results.truncate(limit);
 
     // Output results
     if json_output {

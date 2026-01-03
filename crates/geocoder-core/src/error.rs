@@ -16,8 +16,7 @@ pub enum Error {
     #[error("invalid query: {0}")]
     InvalidQuery(String),
 
-    /// SQLite error (native builds).
-    #[cfg(feature = "native")]
+    /// SQLite error.
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
