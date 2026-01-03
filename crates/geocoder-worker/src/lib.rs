@@ -27,7 +27,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     if let Ok(rate_limiter) = env.rate_limiter("RATE_LIMITER") {
         if let Ok(outcome) = rate_limiter.limit(ip).await {
             if !outcome.success {
-                let mut headers = cors_headers();
+                let headers = cors_headers();
                 headers.set("Retry-After", "60").ok();
                 return Ok(Response::error("Rate limit exceeded", 429)?.with_headers(headers));
             }
@@ -63,8 +63,12 @@ fn cors_headers() -> Headers {
 fn preflight_response() -> Result<Response> {
     let headers = Headers::new();
     headers.set("Access-Control-Allow-Origin", "*").unwrap();
-    headers.set("Access-Control-Allow-Methods", "GET, OPTIONS").unwrap();
-    headers.set("Access-Control-Allow-Headers", "Content-Type").unwrap();
+    headers
+        .set("Access-Control-Allow-Methods", "GET, OPTIONS")
+        .unwrap();
+    headers
+        .set("Access-Control-Allow-Headers", "Content-Type")
+        .unwrap();
     headers.set("Access-Control-Max-Age", "86400").unwrap();
     Ok(Response::empty()?.with_status(204).with_headers(headers))
 }

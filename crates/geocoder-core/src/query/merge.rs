@@ -94,12 +94,10 @@ mod tests {
             make_result("id-2", "London, GB", 0.85),
         ];
 
-        let country = vec![
-            vec![
-                make_result("id-1", "Paris, FR (dup)", 0.7), // Duplicate, should be ignored
-                make_result("id-3", "Lyon, FR", 0.6),
-            ],
-        ];
+        let country = vec![vec![
+            make_result("id-1", "Paris, FR (dup)", 0.7), // Duplicate, should be ignored
+            make_result("id-3", "Lyon, FR", 0.6),
+        ]];
 
         let merged = merge_results(head, country, 10);
 
@@ -111,16 +109,12 @@ mod tests {
 
     #[test]
     fn test_merge_sorting() {
-        let head = vec![
-            make_result("id-1", "A", 0.5),
-        ];
+        let head = vec![make_result("id-1", "A", 0.5)];
 
-        let country = vec![
-            vec![
-                make_result("id-2", "B", 0.9),
-                make_result("id-3", "C", 0.3),
-            ],
-        ];
+        let country = vec![vec![
+            make_result("id-2", "B", 0.9),
+            make_result("id-3", "C", 0.3),
+        ]];
 
         let merged = merge_results(head, country, 10);
 
@@ -138,12 +132,10 @@ mod tests {
             make_result("id-3", "C", 0.7),
         ];
 
-        let country = vec![
-            vec![
-                make_result("id-4", "D", 0.6),
-                make_result("id-5", "E", 0.5),
-            ],
-        ];
+        let country = vec![vec![
+            make_result("id-4", "D", 0.6),
+            make_result("id-5", "E", 0.5),
+        ]];
 
         let merged = merge_results(head, country, 3);
 

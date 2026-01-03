@@ -7,8 +7,12 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::error::Result;
-use crate::query::{calculate_boosted_score, prepare_fts_query, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL};
-use crate::types::{DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult};
+use crate::query::{
+    calculate_boosted_score, prepare_fts_query, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL,
+};
+use crate::types::{
+    DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
+};
 
 use std::collections::HashSet;
 
@@ -177,11 +181,11 @@ impl Database {
 
     /// Get metadata value by key.
     pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
-        let result: std::result::Result<String, _> = self.conn.query_row(
-            "SELECT value FROM metadata WHERE key = ?1",
-            [key],
-            |row| row.get(0),
-        );
+        let result: std::result::Result<String, _> =
+            self.conn
+                .query_row("SELECT value FROM metadata WHERE key = ?1", [key], |row| {
+                    row.get(0)
+                });
 
         match result {
             Ok(value) => Ok(Some(value)),
@@ -219,7 +223,8 @@ impl Database {
             })
         })?;
 
-        let division_rows: Vec<ReverseDivisionRow> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        let division_rows: Vec<ReverseDivisionRow> =
+            rows.collect::<std::result::Result<Vec<_>, _>>()?;
 
         if division_rows.is_empty() {
             return Ok(None);
@@ -240,7 +245,7 @@ impl Database {
         let mut seen_subtypes = HashSet::new();
 
         for row in &deduped {
-            if let Some(div_type) = DivisionType::from_str(&row.subtype) {
+            if let Some(div_type) = DivisionType::parse(&row.subtype) {
                 if seen_subtypes.insert(div_type) {
                     hierarchy.push(HierarchyEntry {
                         gers_id: row.gers_id.clone(),
@@ -253,7 +258,7 @@ impl Database {
 
         // Sort hierarchy by priority (most specific first)
         hierarchy.sort_by_key(|h| {
-            DivisionType::from_str(&h.subtype)
+            DivisionType::parse(&h.subtype)
                 .map(|dt| dt.priority())
                 .unwrap_or(10)
         });
@@ -302,8 +307,11 @@ struct ReverseDivisionRow {
     bbox_xmax: f64,
     bbox_ymax: f64,
     area: f64,
+    #[allow(dead_code)]
     population: Option<i64>,
+    #[allow(dead_code)]
     country: Option<String>,
+    #[allow(dead_code)]
     region: Option<String>,
 }
 

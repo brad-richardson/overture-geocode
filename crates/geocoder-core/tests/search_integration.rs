@@ -27,7 +27,9 @@ fn get_db() -> Option<Database> {
 #[test]
 fn test_search_new_york() {
     let Some(db) = get_db() else {
-        eprintln!("Skipping: US shard not found. Run: python scripts/build_shards.py --countries US");
+        eprintln!(
+            "Skipping: US shard not found. Run: python scripts/build_shards.py --countries US"
+        );
         return;
     };
 
@@ -126,7 +128,10 @@ fn test_autocomplete() {
     query.autocomplete = true;
     let results = db.search(&query).unwrap();
 
-    assert!(!results.is_empty(), "Autocomplete should return results for 'bost'");
+    assert!(
+        !results.is_empty(),
+        "Autocomplete should return results for 'bost'"
+    );
 
     // Should find Boston with prefix match
     let has_boston = results.iter().any(|r| r.primary_name.contains("Boston"));
@@ -170,7 +175,11 @@ fn test_location_bias_us_elevates_us_results() {
     results.truncate(10);
 
     // After bias, US results should be ranked higher
-    let us_count_in_top_5 = results.iter().take(5).filter(|r| r.country.as_deref() == Some("US")).count();
+    let us_count_in_top_5 = results
+        .iter()
+        .take(5)
+        .filter(|r| r.country.as_deref() == Some("US"))
+        .count();
 
     assert!(
         us_count_in_top_5 >= 3,

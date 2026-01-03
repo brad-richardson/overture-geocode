@@ -27,18 +27,21 @@ pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
     // Tokenize: lowercase, keep only alphanumeric, whitespace, and hyphens
     let normalized: String = query
         .chars()
-        .filter_map(|c| {
+        .map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
-                Some(c.to_ascii_lowercase())
+                c.to_ascii_lowercase()
             } else {
                 // Replace punctuation with space
-                Some(' ')
+                ' '
             }
         })
         .collect();
 
     // Split into tokens, filter empty
-    let tokens: Vec<&str> = normalized.split_whitespace().filter(|t| !t.is_empty()).collect();
+    let tokens: Vec<&str> = normalized
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .collect();
 
     if tokens.is_empty() {
         return String::new();
@@ -79,13 +82,19 @@ mod tests {
 
     #[test]
     fn test_punctuation_removal() {
-        assert_eq!(prepare_fts_query("new york, ny", true), r#""new" "york" "ny"*"#);
+        assert_eq!(
+            prepare_fts_query("new york, ny", true),
+            r#""new" "york" "ny"*"#
+        );
         assert_eq!(prepare_fts_query("st. louis", true), r#""st" "louis"*"#);
     }
 
     #[test]
     fn test_hyphenated_words() {
-        assert_eq!(prepare_fts_query("winston-salem", true), r#""winston-salem"*"#);
+        assert_eq!(
+            prepare_fts_query("winston-salem", true),
+            r#""winston-salem"*"#
+        );
     }
 
     #[test]
@@ -103,6 +112,9 @@ mod tests {
 
     #[test]
     fn test_extra_whitespace() {
-        assert_eq!(prepare_fts_query("  boston   ma  ", true), r#""boston" "ma"*"#);
+        assert_eq!(
+            prepare_fts_query("  boston   ma  ", true),
+            r#""boston" "ma"*"#
+        );
     }
 }

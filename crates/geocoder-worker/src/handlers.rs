@@ -38,17 +38,10 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
         .map(|a| a == "1" || a == "true")
         .unwrap_or(true);
 
-    let format = params
-        .get("format")
-        .map(|f| f.as_str())
-        .unwrap_or("json");
+    let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
 
     // Get country bias from Cloudflare headers
-    let cf_country = req
-        .headers()
-        .get("CF-IPCountry")
-        .ok()
-        .flatten();
+    let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
     // Build query with location bias
     let bias = match &cf_country {
@@ -93,15 +86,13 @@ pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Respo
     };
 
     // Get country from Cloudflare headers
-    let cf_country = req
-        .headers()
-        .get("CF-IPCountry")
-        .ok()
-        .flatten();
+    let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
     // Load shards and reverse geocode
     let loader = ShardLoader::new(&ctx.env)?;
-    let result = loader.reverse_geocode(lat, lon, cf_country.as_deref()).await?;
+    let result = loader
+        .reverse_geocode(lat, lon, cf_country.as_deref())
+        .await?;
 
     match result {
         Some(r) => Response::from_json(&r),

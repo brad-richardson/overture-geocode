@@ -28,7 +28,7 @@ impl GeocoderQuery {
 
     /// Set the result limit.
     pub fn with_limit(mut self, limit: usize) -> Self {
-        self.limit = limit.min(40).max(1);
+        self.limit = limit.clamp(1, 40);
         self
     }
 
@@ -56,11 +56,7 @@ pub enum LocationBias {
     /// Bias towards specific coordinates.
     Coordinates { lat: f64, lon: f64 },
     /// Bias towards both country and coordinates.
-    Full {
-        country: String,
-        lat: f64,
-        lon: f64,
-    },
+    Full { country: String, lat: f64, lon: f64 },
 }
 
 /// A geocoding result.
@@ -122,7 +118,12 @@ impl DivisionRow {
             lat: self.lat,
             lon: self.lon,
             // GeoJSON bbox order: [min_lon, min_lat, max_lon, max_lat]
-            bbox: [self.bbox_xmin, self.bbox_ymin, self.bbox_xmax, self.bbox_ymax],
+            bbox: [
+                self.bbox_xmin,
+                self.bbox_ymin,
+                self.bbox_xmax,
+                self.bbox_ymax,
+            ],
             // Convert boosted score to importance (0-1 scale).
             // More negative score = higher importance.
             importance: (-self.boosted_score / 50.0).clamp(0.0, 1.0),
@@ -162,7 +163,7 @@ impl DivisionType {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "country" => Some(Self::Country),
             "region" => Some(Self::Region),
