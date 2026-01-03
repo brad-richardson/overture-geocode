@@ -135,10 +135,10 @@ impl Database {
 
     /// Get the number of records in the divisions table.
     pub fn count(&self) -> Result<u64> {
-        let count: u64 = self
+        let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM divisions", [], |row| row.get(0))?;
-        Ok(count)
+        Ok(count as u64)
     }
 
     /// Get metadata value by key.

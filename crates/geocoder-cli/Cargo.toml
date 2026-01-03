@@ -10,6 +10,6 @@ name = "geocoder"
 path = "src/main.rs"
 
 [dependencies]
-geocoder-core = { path = "../geocoder-core", features = ["native"] }
+geocoder-core = { path = "../geocoder-core" }
 anyhow = { workspace = true }
 serde_json = { workspace = true }

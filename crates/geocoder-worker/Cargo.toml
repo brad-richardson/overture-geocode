@@ -12,8 +12,8 @@ crate-type = ["cdylib"]
 # Cloudflare Workers
 worker = "0.5"
 
-# Core geocoder (without native SQLite)
-geocoder-core = { path = "../geocoder-core", default-features = false }
+# Core geocoder with rusqlite (supports wasm32 in 0.38+)
+geocoder-core = { path = "../geocoder-core" }
 
 # Serialization
 serde = { workspace = true }

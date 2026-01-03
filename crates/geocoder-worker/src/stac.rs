@@ -1,6 +1,6 @@
 //! STAC catalog loading and shard management.
 
-use geocoder_core::{GeocoderQuery, GeocoderResult};
+use geocoder_core::{Database, GeocoderQuery, GeocoderResult};
 use serde::Deserialize;
 use worker::*;
 
@@ -165,7 +165,7 @@ impl<'a> ShardLoader<'a> {
         &self,
         collection: &StacCollection,
         shard_id: &str,
-        _query: &GeocoderQuery,
+        query: &GeocoderQuery,
     ) -> Result<Vec<GeocoderResult>> {
         // Load the shard item metadata
         let version = &collection.id.replace("geocoder-", "");
@@ -200,16 +200,21 @@ impl<'a> ShardLoader<'a> {
             .bytes()
             .await?;
 
-        // Query the shard
-        // TODO: Implement actual SQLite query using WASM
-        // For now, return empty results
         console_log!(
-            "Would query shard {} ({} bytes, {} records)",
+            "Loading shard {} ({} bytes, {} records)",
             shard_id,
             shard_bytes.len(),
             item.properties.record_count
         );
 
-        Ok(vec![])
+        // Open the SQLite database from bytes and query it
+        let db = Database::from_bytes(&shard_bytes)
+            .map_err(|e| Error::RustError(format!("Failed to open shard database: {}", e)))?;
+
+        let results = db
+            .search(query)
+            .map_err(|e| Error::RustError(format!("Search failed: {}", e)))?;
+
+        Ok(results)
     }
 }
