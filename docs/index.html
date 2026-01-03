@@ -538,12 +538,12 @@
           }
         },
         layers: [
-          // Background
+          // Background (ocean)
           {
             id: 'background',
             type: 'background',
             paint: {
-              'background-color': '#0a0a0a'
+              'background-color': '#a3c7df'
             }
           },
           // Water
@@ -553,7 +553,7 @@
             source: 'overture-base',
             'source-layer': 'water',
             paint: {
-              'fill-color': '#1a1a2e'
+              'fill-color': '#a3c7df'
             }
           },
           // Land
@@ -563,7 +563,7 @@
             source: 'overture-base',
             'source-layer': 'land',
             paint: {
-              'fill-color': '#141414'
+              'fill-color': '#f5f3ed'
             }
           },
           // Land use
@@ -576,12 +576,12 @@
               'fill-color': [
                 'match',
                 ['get', 'subtype'],
-                'park', '#0d1f0d',
-                'forest', '#0a1a0a',
-                'residential', '#181818',
-                'commercial', '#1a1818',
-                'industrial', '#1a1a18',
-                '#161616'
+                'park', '#c8e6c8',
+                'forest', '#b8d4b8',
+                'residential', '#f0ece4',
+                'commercial', '#f5e8dc',
+                'industrial', '#e8e4d8',
+                '#ebe8e0'
               ],
               'fill-opacity': 0.7
             }
@@ -594,7 +594,7 @@
             'source-layer': 'segment',
             filter: ['in', ['get', 'subtype'], ['literal', ['residential', 'service', 'track', 'path']]],
             paint: {
-              'line-color': '#2a2a2a',
+              'line-color': '#ffffff',
               'line-width': [
                 'interpolate', ['linear'], ['zoom'],
                 12, 0.5,
@@ -611,7 +611,7 @@
             'source-layer': 'segment',
             filter: ['in', ['get', 'subtype'], ['literal', ['primary', 'secondary', 'tertiary']]],
             paint: {
-              'line-color': '#3a3a3a',
+              'line-color': '#e8dcc0',
               'line-width': [
                 'interpolate', ['linear'], ['zoom'],
                 8, 0.5,
@@ -629,7 +629,7 @@
             'source-layer': 'segment',
             filter: ['in', ['get', 'subtype'], ['literal', ['motorway', 'trunk']]],
             paint: {
-              'line-color': '#4a4a4a',
+              'line-color': '#d4a0a0',
               'line-width': [
                 'interpolate', ['linear'], ['zoom'],
                 5, 0.5,
@@ -646,7 +646,7 @@
             source: 'overture-buildings',
             'source-layer': 'building',
             paint: {
-              'fill-color': '#1f1f1f',
+              'fill-color': '#d4ccc0',
               'fill-opacity': 0.8
             },
             minzoom: 13
@@ -658,52 +658,110 @@
             source: 'overture-buildings',
             'source-layer': 'building',
             paint: {
-              'line-color': '#2a2a2a',
+              'line-color': '#b8a898',
               'line-width': 0.5
             },
             minzoom: 15
           },
-          // Division boundaries
+          // City/locality labels
           {
-            id: 'division-boundaries',
-            type: 'line',
-            source: 'overture-divisions',
-            'source-layer': 'division_boundary',
-            paint: {
-              'line-color': '#3b82f6',
-              'line-width': [
-                'interpolate', ['linear'], ['zoom'],
-                3, 0.5,
-                10, 1.5
-              ],
-              'line-opacity': 0.4,
-              'line-dasharray': [2, 2]
-            },
-            minzoom: 3
-          },
-          // Place labels
-          {
-            id: 'place-labels',
+            id: 'city-labels',
             type: 'symbol',
             source: 'overture-divisions',
             'source-layer': 'division',
-            filter: ['in', ['get', 'subtype'], ['literal', ['locality', 'county', 'region']]],
+            filter: ['==', ['get', 'subtype'], 'locality'],
+            minzoom: 3,
             layout: {
               'text-field': ['get', '@name'],
+              'text-font': ['Noto Sans Bold'],
               'text-size': [
                 'interpolate', ['linear'], ['zoom'],
-                5, 10,
-                12, 14
+                3, 10,
+                6, 12,
+                10, 14,
+                14, 16
               ],
               'text-anchor': 'center',
-              'text-max-width': 8
+              'text-max-width': 8,
+              'text-optional': false,
+              'text-allow-overlap': false,
+              'text-padding': 2,
+              'symbol-sort-key': ['*', -1, ['coalesce', ['get', 'population'], 0]]
             },
             paint: {
-              'text-color': 'rgba(255, 255, 255, 0.7)',
-              'text-halo-color': 'rgba(0, 0, 0, 0.8)',
+              'text-color': '#404050',
+              'text-halo-color': '#ffffff',
               'text-halo-width': 1.5
+            }
+          },
+          // Country labels
+          {
+            id: 'country-labels',
+            type: 'symbol',
+            source: 'overture-divisions',
+            'source-layer': 'division',
+            filter: ['==', ['get', 'subtype'], 'country'],
+            minzoom: 1,
+            maxzoom: 6,
+            layout: {
+              'text-field': ['get', '@name'],
+              'text-font': ['Noto Sans Bold'],
+              'text-size': [
+                'interpolate', ['linear'], ['zoom'],
+                1, 10,
+                3, 14,
+                6, 16
+              ],
+              'text-transform': 'uppercase',
+              'text-letter-spacing': 0.15,
+              'text-anchor': 'center',
+              'text-max-width': 12
             },
-            minzoom: 5
+            paint: {
+              'text-color': '#606070',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 2,
+              'text-opacity': [
+                'interpolate', ['linear'], ['zoom'],
+                4, 1,
+                6, 0.5
+              ]
+            }
+          },
+          // State/region labels
+          {
+            id: 'state-labels',
+            type: 'symbol',
+            source: 'overture-divisions',
+            'source-layer': 'division',
+            filter: ['==', ['get', 'subtype'], 'region'],
+            minzoom: 2,
+            maxzoom: 10,
+            layout: {
+              'text-field': ['get', '@name'],
+              'text-font': ['Noto Sans Bold'],
+              'text-size': [
+                'interpolate', ['linear'], ['zoom'],
+                2, 8,
+                4, 11,
+                6, 14,
+                10, 12
+              ],
+              'text-transform': 'uppercase',
+              'text-letter-spacing': 0.1,
+              'text-anchor': 'center',
+              'text-max-width': 10
+            },
+            paint: {
+              'text-color': '#606070',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 2,
+              'text-opacity': [
+                'interpolate', ['linear'], ['zoom'],
+                8, 1,
+                10, 0.6
+              ]
+            }
           }
         ]
       },
