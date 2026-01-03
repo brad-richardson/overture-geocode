@@ -764,26 +764,34 @@ export class OvertureGeocoder {
   }
 
   private parseResults(data: unknown): GeocoderResult[] {
-    if (!Array.isArray(data)) return [];
+    // Handle wrapped response format { results: [...] }
+    const results = (data as Record<string, unknown>)?.results;
+    const items = Array.isArray(results) ? results : Array.isArray(data) ? data : [];
 
-    return data.map((r) => {
+    return items.map((r) => {
       const record = r as Record<string, unknown>;
+      // Handle both 'name' (API) and 'primary_name' (legacy) field names
+      const name = (record.name as string) || (record.primary_name as string);
+      // Handle both 'bbox' (API) and 'boundingbox' (legacy) field names
+      const bbox = (record.bbox as [number, number, number, number]) ||
+        (record.boundingbox as [number, number, number, number]);
       return {
         gers_id: record.gers_id as string,
-        primary_name: record.primary_name as string,
+        primary_name: name,
         lat: record.lat as number,
         lon: record.lon as number,
-        boundingbox: record.boundingbox as [number, number, number, number],
+        boundingbox: bbox,
         importance: (record.importance as number) || 0,
-        type: (record.type as string) || "unknown",
+        type: (record.division_type as string) || (record.type as string) || "unknown",
       };
     });
   }
 
   private parseReverseResults(data: unknown): ReverseGeocoderResult[] {
-    if (!Array.isArray(data)) return [];
+    // Handle single result object (API returns single result, not array)
+    const items = Array.isArray(data) ? data : data && typeof data === 'object' ? [data] : [];
 
-    return data.map((r) => {
+    return items.map((r) => {
       const record = r as Record<string, unknown>;
       return {
         gers_id: record.gers_id as string,
